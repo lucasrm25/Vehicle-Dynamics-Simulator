@@ -1,0 +1,730 @@
+classdef veh_sus < matlab.mixin.Copyable  
+    
+% LEGEND:
+%   u = Rotation or Displacement vector
+%   b = Rotation angle or Displacement magnitude
+%   c = Rotation center
+%   v = Loop position vectors
+%   n = Normal vector
+%   Components (x=_1, y=_2 and z=_3)
+%   UA = Upper Arm
+%   UR = Upright
+%   LA = Lower Arm
+%   CH = Chassis
+%   SR = Steering Rack
+%   TR = Tie Rod
+%   WH = Wheel
+%   TY = Tyre
+%   DS = Damper/Spring
+%   RK = Rocker
+%   PR = Push Rod
+%   AB = ARB Blade
+%   AL = ARB Link
+%   AR = ARB Bar    
+    
+    
+%% Properties
+
+    properties
+        init
+        setup
+        veh_tyr
+        unsMass
+        
+        q           % vector of strings (symbolic names)
+        q_val       % struct of doubles
+        
+        s           % vector of strings (symbolic names)
+        s_prefix    % vector of strings (symbolic names with prefix)
+        s_val       % struct of doubles      
+        kin         % struct with matrices
+        
+        Kmatrix
+        Lmatrix
+        
+        reshapefun
+    end
+    properties (GetAccess=private)
+        pHandles
+    end
+    properties (Constant)
+    end
+    properties (Dependent)
+    end
+    
+%% Methods
+    methods(Static)
+        function [ structArray ] = syms2structArray( syms, array, dim )
+            cell_array = num2cell(array);
+            fieldNames = cellfun(@char, sym2cell(syms),'UniformOutput', false);
+            structArray = cell2struct(cell_array,fieldNames, dim);
+        end
+        function [ structArray ] = syms2structArray2( syms, array )
+            for i=1:numel(array)
+                structArray.(char(syms(i))) = array(i);
+            end
+        end
+    end
+    methods
+        function obj = veh_sus(init, setup, unsMass, veh_tyr, WH_stroke, WH_steps, SR_stroke, SR_steps)
+            obj.init    = init;
+            obj.setup   = setup;
+            obj.veh_tyr = veh_tyr;
+            obj.unsMass = unsMass;
+            obj.calculateKinematics(WH_stroke, WH_steps, SR_stroke, SR_steps);
+        end
+        
+        function obj = reshape(obj,new_size,new_positions)
+            shift = zeros(numel(obj.q),new_size);
+            shift(1,new_positions(1)) = 1;
+            shift(2,new_positions(2)) = 1;
+            obj.reshapefun = @(fun,q,s) vpa(fun(q(new_positions),s))*shift;
+        end
+        
+        % Set a single value for the principal coordinates and receive the
+        % value of all the secundary coordinates through the structure obj.s_val
+        function obj = set.q_val(obj,q_val)
+            for i=1:numel(obj.q)
+                obj.q_val.(char(obj.q(i))) = q_val(i);
+            end
+            s_val = obj.interpKin(obj.q(1), obj.q_val.LAUR_3, obj.q(2), obj.q_val.bSR, obj.s);
+            for i=1:numel(obj.s)
+                obj.s_val.(char(obj.s(i))) = s_val(i);
+            end
+        end
+        
+        % Return a 3 dimensional array (1st principal coord., 2nd principal coord, kinematic field)
+        % Xq and Yq can be double, array or matrix
+        function Vq = interpKin(obj, XFieldName, Xq, YFieldName, Yq, fieldNames)
+            X = obj.kin.(char(XFieldName));
+            Y = obj.kin.(char(YFieldName));           
+            for i = 1:numel(fieldNames)
+                if strcmp(class(fieldNames),'sym')
+                    V{i}  = obj.kin.(char(fieldNames(i)));
+                else
+                    V{i}  = obj.kin.(char(fieldNames{i}));
+                end
+                if min(size(V{i})) == 1
+                    Vq(i) = interp1(X,V{i},Xq,'pchip',0);
+                else
+                    Vq(i) = interp2(X,Y,V{i},Xq,Yq,'cubic',0);
+                end
+            end
+            Vq = Vq';
+        end
+        
+        function obj = set_prefix(obj, prefix)
+            if ~isempty(obj.s)
+                for i=1:numel(obj.s)
+                    obj.s_prefix.(char(obj.s(i))) = sym(strcat(prefix,char(obj.s(i))));
+                end
+            end
+            
+        end
+        
+        function calculateKinematics(obj,WH_stroke, WH_steps, SR_stroke, SR_steps)
+            totaltime = tic;
+
+            fprintf('Initializing Kinematics...\n')
+
+            digits(4)
+            
+            bSR  = sym('bSR');
+            LAUR = sym('LAUR_%d', [3 1]);
+
+            % Main Coordinates
+            obj.q = [LAUR(3); 
+                     bSR];
+
+
+            %% Front left suspension kinematics
+
+            uUA = obj.init.UACH1_0 - obj.init.UACH2_0;         
+            uLA = obj.init.LACH1_0 - obj.init.LACH2_0;
+            cFUA = (obj.init.UACH1_0 + obj.init.UACH2_0)/2;    
+            cFLA = (obj.init.LACH1_0 + obj.init.LACH2_0)/2;
+
+            vUA = cFUA - obj.init.UAUR_0;          
+            vUR = obj.init.UAUR_0 - obj.init.LAUR_0;       
+            vLA = obj.init.LAUR_0 - cFLA;         
+            vCH = cFLA - cFUA;
+
+            % New coordinate variables to be solved (8 Variables)
+            UAUR = sym('UAUR_%d', [3 1]);
+            bUA  = sym('bUA');
+            bLA  = sym('bLA');
+
+            % Loop vector functions - (8 Variables, 7 Equations = 1 main CO, 7 secondary COs)
+            f_S = vpa([ rotateVector(vLA,uLA,bLA) + (UAUR-LAUR) + rotateVector(vUA,uUA,bUA) + vCH;
+                         rotatePoint(obj.init.UAUR_0,uUA,bUA,cFUA) - UAUR ;
+                         norm(UAUR-LAUR) - norm(obj.init.UAUR_0-obj.init.LAUR_0)    ]);
+            f_S = simplify(f_S);
+
+            s_S   = [LAUR(1:2);   UAUR;   bUA; bLA];
+            s_S_0 = [obj.init.LAUR_0(1:2); obj.init.UAUR_0; 0;    0];
+
+            q_S = [LAUR(3)];
+
+            J_S = jacobian(f_S,s_S);
+            B_S = -jacobian(f_S,q_S);
+            
+            K_S = (J_S\B_S);
+            K_S = K_S * ( jacobian(q_S,obj.q) );      % Convert to main coordinates
+            K_S = simplify(K_S);
+
+
+            %% Steering system kinematics
+
+            uSR = [0 1 0]';
+
+            % New coordinate variables to be solved (7 Variables)
+            SRTR = sym('SRTR_%d', [3 1]);
+            TRUR = sym('TRUR_%d', [3 1]);
+
+            % Loop vector functions - (13 Variables, 6 Equations = 7 main CO, 6 secondary COs)
+            f_SS = vpa([ obj.init.SRTR_0 + bSR*uSR - SRTR;
+                         norm(TRUR-SRTR) - norm(obj.init.TRUR_0-obj.init.SRTR_0);
+                         norm(LAUR-TRUR) - norm(obj.init.LAUR_0-obj.init.TRUR_0);
+                         norm(UAUR-TRUR) - norm(obj.init.UAUR_0-obj.init.TRUR_0)   ]);
+            f_SS = simplify(f_SS);
+
+            s_SS   = [SRTR; TRUR];
+            s_SS_0 = [obj.init.SRTR_0; obj.init.TRUR_0];
+
+            q_SS = [LAUR; UAUR; bSR];
+
+            J_SS = jacobian(f_SS,s_SS);
+            B_SS = -jacobian(f_SS,q_SS);
+            
+            K_SS = (J_SS\B_SS);
+            K_SS = K_SS * ( jacobian(q_SS,s_S)*K_S + jacobian(q_SS,obj.q) );      % Convert to main coordinates
+%             K_SS = simplify(K_SS);
+
+
+
+            %% Front Wheel kinematics
+
+
+            % New coordinate variables to be solved (6 Variables)
+            uWH = sym('uWH_%d', [3 1]);     % Wheel rotation vector
+            cWH = sym('cWH_%d', [3 1]);
+
+
+            % c0 = [DNA.DIN_CO(1) DNA.track/2+obj.setup.camber*obj.tyre.unloadedRadius DNA.DIN_CO(3)]';
+            c0 = obj.init.cWH_0;
+            v0 = rotateVector(rotateVector([0 1 0]',[1 0 0]',obj.setup.camber),[0 0 1]',-obj.setup.toe);                       
+
+            g_WH = matlabFunction(simplify(vpa([...
+                createTmatrixFunction_point(LAUR,TRUR,UAUR,obj.init.LAUR_0,obj.init.TRUR_0,obj.init.UAUR_0,c0);
+                createTmatrixFunction_vector(LAUR,TRUR,UAUR,obj.init.LAUR_0,obj.init.TRUR_0,obj.init.UAUR_0,v0) ])));
+
+            s_WH   = [cWH; uWH];
+            q_WH = [LAUR; UAUR; TRUR];
+
+            K_WH = vpa(jacobian(g_WH,q_WH));
+            K_WH = K_WH*( jacobian(q_WH,s_S)*K_S + jacobian(q_WH,s_SS)*K_SS + jacobian(q_WH,obj.q) );
+
+
+            %% Front tyre contact point
+
+            % New coordinate variables to be solved (7 Variables)
+            TYRO = sym('TYRO_%d', [3 1]);
+
+            z = [0 0 1]';
+            d_vector = cross(uWH,cross(-z,uWH));
+
+            g_TY = matlabFunction(vpa( d_vector/norm(d_vector)*obj.veh_tyr.unloadedRadius + cWH ));
+
+            s_TY   = [TYRO];
+            q_TY = [cWH; uWH];
+
+            K_TY = vpa(jacobian(g_TY,q_TY));
+            K_TY = K_TY*( jacobian(q_TY,s_WH)*K_WH );
+
+
+            %% Push Rod kinematics
+
+            PRUA = sym('PRUA_%d', [3 1]);
+
+            % g_FPR = PRUA
+            g_PR = matlabFunction(vpa(...
+                createTmatrixFunction_point(obj.init.UACH1_0,obj.init.UACH2_0,UAUR,obj.init.UACH1_0,obj.init.UACH2_0,obj.init.UAUR_0,obj.init.PRUA_0) ));
+
+            s_PR = PRUA;
+            q_PR = UAUR;
+
+            K_PR = vpa(jacobian(g_PR,q_PR));
+            K_PR = K_PR*( jacobian(q_PR,s_S)*K_S );
+            K_PR = simplify(K_PR);
+            
+
+            %% Rocker kinematics
+
+            RKPR = sym('RKPR_%d', [3 1]);
+            syms bRK
+
+            uRK = cross((obj.init.RKPR_0-obj.init.RKCH_0),(obj.init.RKDS_0-obj.init.RKCH_0));
+
+            f_RK = vpa([ rotatePoint(obj.init.RKPR_0,uRK,bRK,obj.init.RKCH_0) - RKPR;
+                          norm(RKPR-PRUA)-norm(obj.init.RKPR_0-obj.init.PRUA_0) ]);
+            f_RK = simplify(f_RK);
+
+            s_RK   = [RKPR; bRK];
+            s_RK_0 = [obj.init.RKPR_0; 0];
+            q_RK   = [PRUA];
+
+            J_RK = jacobian(f_RK,s_RK);
+            B_RK = -jacobian(f_RK,q_RK);
+            
+            K_RK = (J_RK\B_RK);
+            K_RK = K_RK * ( jacobian(q_RK,s_PR)*K_PR );
+%             K_RK = simplify(K_RK);
+
+            %% Damper/Spring Kinematics
+
+            RKDS = sym('RKDS_%d', [3 1]);
+            syms bDS                            % Damper/Spring length
+
+            g_DS = matlabFunction(vpa([ rotatePoint(obj.init.RKDS_0,uRK,bRK,obj.init.RKCH_0);
+                                        norm(rotatePoint(obj.init.RKDS_0,uRK,bRK,obj.init.RKCH_0) - obj.init.DSCH_0) ]));
+
+            s_DS   = [RKDS; bDS];
+            q_DS   = bRK;
+
+            K_DS = vpa(jacobian(g_DS,q_DS));
+            K_DS = K_DS * ( jacobian(q_DS,s_RK)*K_RK );
+
+
+            %% ARB Kinematics
+
+            uAR = [0 1 0]';
+
+            RKAL = sym('RKAL_%d', [3 1]);
+            ALAB = sym('ALAB_%d', [3 1]);
+            syms bAR
+
+            f_AR = vpa([ rotatePoint(obj.init.RKAL_0,uRK,bRK,obj.init.RKCH_0) - RKAL;
+                         norm(ALAB-RKAL) - norm(obj.init.ALAB_0-obj.init.RKAL_0);
+                         rotatePoint(obj.init.ALAB_0,uAR,bAR,obj.init.ALAR_0) - ALAB ]);
+
+            s_AR   = [RKAL; ALAB; bAR];
+            s_AR_0 = [obj.init.RKAL_0; obj.init.ALAB_0; 0];
+
+            q_AR = [bRK];
+
+            J_AR = jacobian(f_AR,s_AR);
+            B_AR = -jacobian(f_AR,q_AR);
+            K_AR = (J_AR\B_AR);          % K = simplify(inv(J)*B);         % ds/dt = K * dq/dt         
+            K_AR = K_AR * ( jacobian(q_AR,s_RK)*K_RK );
+
+            
+            %% Toe and Camber
+
+%             syms toe camber heave
+%             
+%             obj.init.TYRO_0 = g_TY(g_WH(obj.init.LAUR_0(1), obj.init.LAUR_0(2), obj.init.LAUR_0(3),...
+%                                         obj.init.TRUR_0(1), obj.init.TRUR_0(2), obj.init.TRUR_0(3),...
+%                                         obj.init.UAUR_0(1), obj.init.UAUR_0(2), obj.init.UAUR_0(3) ));
+%             
+%             g_TC = matlabFunction(vpa([ angle2vectors([0 1 0],[1 1 0]'.*uWH)  ;
+%                                         angle2vectors([0 1 0],[0 1 1]'.*uWH)  ;
+%                                         ]));
+%             s_TC = [toe camber];
+%             q_TC = uWH;
+
+            
+            %% Jacobian Matrices
+
+            obj.s =     [s_S ; s_SS ; s_WH ; s_TY ; s_PR ; s_RK ; s_DS ; s_AR];
+            K_all = vpa([K_S ; K_SS ; K_WH ; K_TY ; K_PR ; K_RK ; K_DS ; K_AR]);
+
+            dispstat('','init')
+            tic
+            for i=1:numel(obj.s)
+                dispstat(sprintf('    Simplifying K and L Matrices %d/%d: %.1fs',i,numel(obj.s),toc))
+                obj.Lmatrix.(char(obj.s(i))) = matlabFunction( jacobian(K_all(i,:),obj.q) ,'Vars',{obj.q,obj.s});
+                obj.Kmatrix.(char(obj.s(i))) = matlabFunction( K_all(i,:) ,'Vars',{obj.q,obj.s});                
+            end
+
+            fprintf('    Total calculation time of [K] and [L] matrices: %.1f s\n',toc)
+            
+            
+            %% Calculate secundary coordinates
+
+            dispstat('','init')
+            dispstat('Mapping Suspension Kinematics ','keepthis')
+
+
+            [LAUR_3_val,bSR_val] = meshgrid(linspace(obj.init.LAUR_0(3)+WH_stroke(1),obj.init.LAUR_0(3)+WH_stroke(2),WH_steps),...
+                                            linspace(SR_stroke(1),SR_stroke(2),SR_steps));
+            obj.kin = cat(3,LAUR_3_val,bSR_val);
+
+            % FS
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    toSolve = subs(f_S, fieldnames(s_all), struct2array(s_all(i,j))' );      %     toSolve = subs(f_S, q_S, s_all(i).(char(q_S)) );
+                    s_S_val(i,j) = vpasolve( toSolve, s_S, s_S_0);
+                    s_S_0 = struct2array(s_S_val(i,j))';
+                    dispstat(sprintf('    Left suspension %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_all = catstruct(s_all,s_S_val);
+            dispstat(' ','keepprev');
+
+            % FSS
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    toSolve = subs(f_SS, fieldnames(s_all), struct2array(s_all(i,j))'); %     toSolve = subs(f_SS, [s_FS;q], [struct2array(s_S_val(i))';struct2array(s_all(:,i))']);
+                    s_SS_val(i,j) = vpasolve( toSolve, s_SS, s_SS_0);
+                    s_SS_0 = struct2array(s_SS_val(i,j))';
+                    dispstat(sprintf('    Steering System %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_all = catstruct(s_all,s_SS_val);
+            dispstat(' ','keepprev');
+
+            % FWH
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    s_WH_0(i,j,:) = g_WH(s_all(i,j).LAUR_1, s_all(i,j).LAUR_2, s_all(i,j).LAUR_3, s_all(i,j).TRUR_1, s_all(i,j).TRUR_2, s_all(i,j).TRUR_3, s_all(i,j).UAUR_1, s_all(i,j).UAUR_2, s_all(i,j).UAUR_3 );   
+                    dispstat(sprintf('    Left Wheel %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_WH_val = veh_sus.syms2structArray(s_WH,s_WH_0,3);
+            s_all = catstruct(s_all,s_WH_val);
+            dispstat(' ','keepprev');
+
+            % FTY
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    s_TY_0(i,j,:) = g_TY(s_all(i,j).cWH_1,s_all(i,j).cWH_2,s_all(i,j).cWH_3,s_all(i,j).uWH_1,s_all(i,j).uWH_2,s_all(i,j).uWH_3);
+                    dispstat(sprintf('    Left Tyre %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_TY_val = veh_sus.syms2structArray(s_TY,s_TY_0,3);
+            s_all = catstruct(s_all,s_TY_val);
+            dispstat(' ','keepprev');
+
+            % FPR
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    s_PR_0(i,j,:) = g_PR(s_all(i,j).UAUR_1,s_all(i,j).UAUR_2,s_all(i,j).UAUR_3);
+                    dispstat(sprintf('    Push Rod %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_PR_val = veh_sus.syms2structArray(s_PR,s_PR_0,3);
+            s_all = catstruct(s_all,s_PR_val);
+            dispstat(' ','keepprev');
+
+            % FRK
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    toSolve = subs(f_RK, fieldnames(s_all), struct2array(s_all(i,j))');
+                    s_RK_val(i,j) = vpasolve( toSolve, s_RK, s_RK_0);
+                    s_RK_0 = struct2array(s_RK_val(i,j))';
+                    dispstat(sprintf('    Rocker %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_all = catstruct(s_all,s_RK_val);
+            dispstat(' ','keepprev');
+
+            % FDS
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    s_DS_0(i,j,:) = g_DS(s_all(i,j).bRK);
+                    dispstat(sprintf('    Damper/Spring %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_DS_val = veh_sus.syms2structArray(s_DS,s_DS_0,3);
+            s_all = catstruct(s_all,s_DS_val);
+            dispstat(' ','keepprev');
+
+            % FAR
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    toSolve = subs(f_AR, fieldnames(s_all), struct2array(s_all(i,j))');
+                    s_AR_val(i,j) = vpasolve( toSolve, s_AR, s_AR_0);
+                    s_AR_0 = struct2array(s_AR_val(i,j))';
+                    dispstat(sprintf('    Anti-Roll-Bar %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_all = catstruct(s_all,s_AR_val);
+            dispstat(' ','keepprev');
+            
+            % FTC
+            tic
+            for i = 1:size(s_all,1)
+                for j = 1:size(s_all,2)
+                    s_TC_0(i,j,:) = g_TC(s_all(i,j).uWH_1, s_all(i,j).uWH_2, s_all(i,j).uWH_3);
+                    dispstat(sprintf('    Toe/Camber %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+                end
+            end
+            s_TC_val = veh_sus.syms2structArray(s_TC,s_TC_0,3);
+            s_all = catstruct(s_all,s_TC_val);
+            dispstat(' ','keepprev');
+
+            
+            fprintf('Converting structures...\n'); tic;
+            obj.kin = structarray2struct(s_all);
+
+%             %% Calculate secundary coordinates
+% 
+%             dispstat('','init')
+%             dispstat('Mapping Suspension Kinematics ','keepthis')
+% 
+% 
+%             [LAUR_3_val,bSR_val] = meshgrid(linspace(obj.init.LAUR_0(3)+WH_stroke(1),obj.init.LAUR_0(3)+WH_stroke(2),WH_steps),...
+%                                             linspace(SR_stroke(1),SR_stroke(2),SR_steps));
+%             s_all = cat(3,LAUR_3_val,bSR_val);
+%             s_all = veh_sus.syms2structArray(obj.q,s_all,3);
+% 
+% 
+%             % FS
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     toSolve = subs(f_S, fieldnames(s_all), struct2array(s_all(i,j))' );      %     toSolve = subs(f_S, q_S, s_all(i).(char(q_S)) );
+%                     s_S_val(i,j) = vpasolve( toSolve, s_S, s_S_0);
+%                     s_S_0 = struct2array(s_S_val(i,j))';
+%                     dispstat(sprintf('    Left suspension %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_all = catstruct(s_all,s_S_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FSS
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     toSolve = subs(f_SS, fieldnames(s_all), struct2array(s_all(i,j))'); %     toSolve = subs(f_SS, [s_FS;q], [struct2array(s_S_val(i))';struct2array(s_all(:,i))']);
+%                     s_SS_val(i,j) = vpasolve( toSolve, s_SS, s_SS_0);
+%                     s_SS_0 = struct2array(s_SS_val(i,j))';
+%                     dispstat(sprintf('    Steering System %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_all = catstruct(s_all,s_SS_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FWH
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     s_WH_0(i,j,:) = g_WH(s_all(i,j).LAUR_1, s_all(i,j).LAUR_2, s_all(i,j).LAUR_3, s_all(i,j).TRUR_1, s_all(i,j).TRUR_2, s_all(i,j).TRUR_3, s_all(i,j).UAUR_1, s_all(i,j).UAUR_2, s_all(i,j).UAUR_3 );   
+%                     dispstat(sprintf('    Left Wheel %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_WH_val = veh_sus.syms2structArray(s_WH,s_WH_0,3);
+%             s_all = catstruct(s_all,s_WH_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FTY
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     s_TY_0(i,j,:) = g_TY(s_all(i,j).cWH_1,s_all(i,j).cWH_2,s_all(i,j).cWH_3,s_all(i,j).uWH_1,s_all(i,j).uWH_2,s_all(i,j).uWH_3);
+%                     dispstat(sprintf('    Left Tyre %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_TY_val = veh_sus.syms2structArray(s_TY,s_TY_0,3);
+%             s_all = catstruct(s_all,s_TY_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FPR
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     s_PR_0(i,j,:) = g_PR(s_all(i,j).UAUR_1,s_all(i,j).UAUR_2,s_all(i,j).UAUR_3);
+%                     dispstat(sprintf('    Push Rod %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_PR_val = veh_sus.syms2structArray(s_PR,s_PR_0,3);
+%             s_all = catstruct(s_all,s_PR_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FRK
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     toSolve = subs(f_RK, fieldnames(s_all), struct2array(s_all(i,j))');
+%                     s_RK_val(i,j) = vpasolve( toSolve, s_RK, s_RK_0);
+%                     s_RK_0 = struct2array(s_RK_val(i,j))';
+%                     dispstat(sprintf('    Rocker %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_all = catstruct(s_all,s_RK_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FDS
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     s_DS_0(i,j,:) = g_DS(s_all(i,j).bRK);
+%                     dispstat(sprintf('    Damper/Spring %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_DS_val = veh_sus.syms2structArray(s_DS,s_DS_0,3);
+%             s_all = catstruct(s_all,s_DS_val);
+%             dispstat(' ','keepprev');
+% 
+%             % FAR
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     toSolve = subs(f_AR, fieldnames(s_all), struct2array(s_all(i,j))');
+%                     s_AR_val(i,j) = vpasolve( toSolve, s_AR, s_AR_0);
+%                     s_AR_0 = struct2array(s_AR_val(i,j))';
+%                     dispstat(sprintf('    Anti-Roll-Bar %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_all = catstruct(s_all,s_AR_val);
+%             dispstat(' ','keepprev');
+%             
+%             % FTC
+%             tic
+%             for i = 1:size(s_all,1)
+%                 for j = 1:size(s_all,2)
+%                     s_TC_0(i,j,:) = g_TC(s_all(i,j).uWH_1, s_all(i,j).uWH_2, s_all(i,j).uWH_3);
+%                     dispstat(sprintf('    Toe/Camber %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+%                 end
+%             end
+%             s_TC_val = veh_sus.syms2structArray(s_TC,s_TC_0,3);
+%             s_all = catstruct(s_all,s_TC_val);
+%             dispstat(' ','keepprev');
+% 
+%             
+%             fprintf('Converting structures...\n'); tic;
+%             obj.kin = structarray2struct(s_all);
+            
+            
+            
+            
+            fprintf('    Finished %.1fs\n',toc(totaltime))
+        end
+        
+        function new = mirror(obj)
+            new = copy(obj);
+            variables2inverse = {'bSR','LAUR_2','UAUR_2','cWH_2','PRUA_2','RKDS_2','RKPR_2','SRTR_2','TRUR_2','TYRO_2','uWH_2','ALAB_2','RKAL_2'};
+            for i=1:numel(variables2inverse)
+                new.kin.(variables2inverse{i})     = -new.kin.(variables2inverse{i});
+                if isfield(new.Kmatrix,variables2inverse{i})
+                    aux = str2func(func2str(new.Kmatrix.(variables2inverse{i})));
+                    new.Kmatrix.(variables2inverse{i}) = @(q,s) -aux(q,s);
+                    aux = str2func(func2str(new.Lmatrix.(variables2inverse{i})));
+                    new.Lmatrix.(variables2inverse{i}) = @(q,s) -aux(q,s);
+%                     new.Kmatrix.(variables2inverse{i}) = @(q,s) -new.Kmatrix.(variables2inverse{i})(q,s); % -new.Kmatrix.(variables2inverse{i});
+%                     new.Lmatrix.(variables2inverse{i}) = @(q,s) -new.Lmatrix.(variables2inverse{i})(q,s); %-new.Lmatrix.(variables2inverse{i});
+                end
+            end
+            init2inverse = {'UACH1_0','UACH2_0','LACH1_0','LACH2_0','DSCH_0','RKCH_0','ALAR_0'};
+            for i=1:numel(init2inverse)
+                new.init.(init2inverse{i}) = new.init.(init2inverse{i}).*[1,-1,1]';
+            end
+        end
+        
+        function vec = plotSpring(~, p1, p2, radius, nCoils )
+            offset = 0.033;
+            springSize = norm(p2-p1)-offset*2;
+            teta = 0:(pi/30):2*pi*nCoils;
+            x = radius*sin(teta);
+            y = radius*cos(teta);
+            z = teta/(2*pi*nCoils)*springSize + offset;
+
+            x = [0 0 x 0 0];
+            y = [0 0 y 0 0];
+            z = [0 offset z offset+springSize 2*offset+springSize];
+
+            % Rotate
+            direction = p2-p1;
+            uInitial  = [0 0 1]';
+            rotation_vector = cross(uInitial,direction);
+            rotation_angle  = acos(dot(uInitial,direction)/(norm(uInitial)*norm(direction)));
+
+            newPoint = rotatePoint([x(:),y(:),z(:)]', rotation_vector, rotation_angle, [0 0 0]');
+            x(:) = newPoint(1,:); y(:) = newPoint(2,:); z(:) = newPoint(3,:);
+
+            % Translate
+            x = x + p1(1);
+            y = y + p1(2);
+            z = z + p1(3);
+
+            vec = [x;y;z];
+        end
+        
+        function plot(obj, fig, init)
+                        
+            LAUR_val = [obj.s_val.LAUR_1 obj.s_val.LAUR_2 obj.q_val.LAUR_3]';
+            UAUR_val = [obj.s_val.UAUR_1 obj.s_val.UAUR_2 obj.s_val.UAUR_3]';
+            SRTR_val = [obj.s_val.SRTR_1 obj.s_val.SRTR_2 obj.s_val.SRTR_3]';
+            TRUR_val = [obj.s_val.TRUR_1 obj.s_val.TRUR_2 obj.s_val.TRUR_3]';
+            uWH_val  = [obj.s_val.uWH_1 obj.s_val.uWH_2 obj.s_val.uWH_3]';
+            cWH_val  = [obj.s_val.cWH_1 obj.s_val.cWH_2 obj.s_val.cWH_3]';
+            TYRO_val = [obj.s_val.TYRO_1 obj.s_val.TYRO_2 obj.s_val.TYRO_3]';
+            RKPR_val = [obj.s_val.RKPR_1 obj.s_val.RKPR_2 obj.s_val.RKPR_3]';
+            PRUA_val = [obj.s_val.PRUA_1 obj.s_val.PRUA_2 obj.s_val.PRUA_3]';
+            RKDS_val = [obj.s_val.RKDS_1 obj.s_val.RKDS_2 obj.s_val.RKDS_3]';
+
+            RKAL_val = [obj.s_val.RKAL_1 obj.s_val.RKAL_2 obj.s_val.RKAL_3]';
+            ALAB_val = [obj.s_val.ALAB_1 obj.s_val.ALAB_2 obj.s_val.ALAB_3]';
+
+            figure(fig)
+
+            if init
+                hold on
+                % Suspension
+                vec = [obj.init.LACH1_0 LAUR_val obj.init.LACH2_0]; pLA = plot3( vec(1,:),vec(2,:),vec(3,:), 'k', 'LineWidth', 5, 'MarkerSize',20,'Marker','.','MarkerEdgeColor','k');
+                vec = [obj.init.UACH1_0 UAUR_val obj.init.UACH2_0]; pUA = plot3( vec(1,:),vec(2,:),vec(3,:), 'k', 'LineWidth', 5, 'MarkerSize',20,'Marker','.');
+                % Steering
+                vec = [SRTR_val.*[1; 0; 1] SRTR_val TRUR_val]; pSR = plot3( vec(1,:),vec(2,:),vec(3,:), 'b', 'LineWidth', 3, 'MarkerSize',20,'Marker','.','MarkerEdgeColor','k','MarkerFaceColor','k');
+                % Upright
+                vec = [LAUR_val UAUR_val TRUR_val];  pUR = fill3(vec(1,:),vec(2,:),vec(3,:),'r');
+                % Wheel
+                vec = obj.veh_tyr.plot(uWH_val, cWH_val);   pWH = surf(vec(:,:,1), vec(:,:,2), vec(:,:,3), 'FaceAlpha', 0.3, 'EdgeAlpha', 0.5, 'FaceColor', 'k', 'FaceLighting','flat');
+                % Tyre-Road Contact
+                pTY = scatter3(TYRO_val(1),TYRO_val(2),TYRO_val(3),50,'filled','MarkerFaceColor','r');
+                % Push-Rod
+                vec = [RKPR_val PRUA_val]; pPR = plot3( vec(1,:),vec(2,:),vec(3,:), 'g', 'LineWidth', 5, 'MarkerSize',15,'Marker','.');
+                % Rocker
+                vec = [RKDS_val RKPR_val obj.init.RKCH_0];  pRK = fill3(vec(1,:),vec(2,:),vec(3,:),'g');
+                % Spring/Damper
+                vec = obj.plotSpring(RKDS_val, obj.init.DSCH_0, 0.02, 6); pSD = plot3(vec(1,:),vec(2,:),vec(3,:), 'Color',[1 .5 0],'LineWidth',5);
+                % ARB
+                vec = [obj.init.ALAR_0.*[1; 0; 1] obj.init.ALAR_0 ALAB_val RKAL_val]; pAR = plot3( vec(1,:),vec(2,:),vec(3,:), 'c', 'LineWidth', 5, 'MarkerSize',20,'Marker','.','MarkerEdgeColor','k','MarkerFaceColor','k');
+                hold off
+
+                obj.pHandles = struct('pLA',pLA,'pUA',pUA,'pSR',pSR,'pUR',pUR,'pWH',pWH,'pTY',pTY,'pPR',pPR,'pRK',pRK,'pSD',pSD,'pAR',pAR);
+            else
+                % Suspension
+                vec = [obj.init.LACH1_0 LAUR_val obj.init.LACH2_0]; obj.pHandles.pLA.XData = vec(1,:); obj.pHandles.pLA.YData = vec(2,:); obj.pHandles.pLA.ZData = vec(3,:);
+                vec = [obj.init.UACH1_0 UAUR_val obj.init.UACH2_0]; obj.pHandles.pUA.XData = vec(1,:); obj.pHandles.pUA.YData = vec(2,:); obj.pHandles.pUA.ZData = vec(3,:);
+                % Steering
+                vec = [SRTR_val.*[1; 0; 1] SRTR_val TRUR_val]; obj.pHandles.pSR.XData = vec(1,:); obj.pHandles.pSR.YData = vec(2,:); obj.pHandles.pSR.ZData = vec(3,:);
+                % Upright
+                vec = [LAUR_val UAUR_val TRUR_val]; obj.pHandles.pUR.Vertices = vec';
+                % Wheel
+                vec = obj.veh_tyr.plot(uWH_val, cWH_val); obj.pHandles.pWH.XData=vec(:,:,1); obj.pHandles.pWH.YData=vec(:,:,2); obj.pHandles.pWH.ZData=vec(:,:,3); 
+                % Tyre-Road Contact
+                obj.pHandles.pTY.XData = TYRO_val(1); obj.pHandles.pTY.YData = TYRO_val(2); obj.pHandles.pTY.ZData = TYRO_val(3);     
+                % Push Rod
+                vec = [RKPR_val PRUA_val]; obj.pHandles.pPR.XData = vec(1,:); obj.pHandles.pPR.YData = vec(2,:); obj.pHandles.pPR.ZData = vec(3,:);        
+                % Rocker
+                vec = [RKDS_val RKPR_val obj.init.RKCH_0];  obj.pHandles.pRK.Vertices = vec';       
+                % Spring/Damper
+                vec = obj.plotSpring(RKDS_val, obj.init.DSCH_0, 0.02, 6); obj.pHandles.pSD.XData = vec(1,:); obj.pHandles.pSD.YData = vec(2,:); obj.pHandles.pSD.ZData = vec(3,:);
+                % ARB
+                vec = [obj.init.ALAR_0.*[1; 0; 1] obj.init.ALAR_0 ALAB_val RKAL_val]; obj.pHandles.pAR.XData = vec(1,:); obj.pHandles.pAR.YData = vec(2,:); obj.pHandles.pAR.ZData = vec(3,:);
+
+            end
+        end
+    end
+    
+end
+
+s

@@ -1,0 +1,417 @@
+clearvars
+clc
+
+tic
+
+fprintf('Initializing Kinematics...\n')
+
+digits(4)
+
+% LEGEND:
+%   u = Rotation or Displacement vector
+%   b = Rotation angle or Displacement magnitude
+%   c = Rotation center
+%   v = Loop position vectors
+%   n = Normal vector
+%   Components (x=_1, y=_2 and z=_3)
+
+%   UA = Upper Arm
+%   UR = Upright
+%   LA = Lower Arm
+%   CH = Chassis
+%   SR = Steering Rack
+%   TR = Tie Rod
+%   WH = Wheel
+%   TY = Tyre
+%   DS = Damper/Spring
+%   RK = Rocker
+%   PR = Push Rod
+%   AB = ARB Blade
+%   AL = ARB Link
+%   AR = ARB Bar
+
+
+%% Mapping options
+
+WH_stroke = [-2 2]*0.0254;
+SR_stroke = [-0.02 0.02];
+
+WH_steps = 30;
+SR_steps = 10;
+
+%% suspension Parameters
+
+% Vehicle Parameters
+DNA.track               = 1.200;        % [m]
+DNA.wheelbase           = 1.55;         % [m]
+DNA.DIN_CO              = [1.528 0 0.2247]'; % [m]
+DNA.CG_pos              = [0 0 0]';     % CG position
+
+tyr.unloadedRadius  = 8*0.0254;     % [m]
+tyr.aspectRatio     = 45;           % -
+tyr.width           = 0.220;        % [m]
+
+% setup
+sus.L.setup.toe                 = 1*pi/180;     % [rad]
+sus.L.setup.camber              = -2*pi/180;    % [rad] 
+% suspension
+sus.L.init.FUACH1_0 = 1e-3*[1659.20 260.000 250.000]';
+sus.L.init.FUACH2_0 = 1e-3*[1409.50 260.000 230.000]';
+sus.L.init.FLACH1_0 = 1e-3*[1648.00 170.000 100.000]';
+sus.L.init.FLACH2_0 = 1e-3*[1406.50 170.000 110.000]';
+sus.L.init.FUAUR_0  = 1e-3*[1513.00 521.000 307.000]';
+sus.L.init.FLAUR_0  = 1e-3*[1525.00 540.000 134.000]';
+% Steering System
+sus.L.init.FTRUR_0 = 1e-3*[1576.00 564.000 165.000]';
+sus.L.init.FSRTR_0 = 1e-3*[1618.00 179.000 123.120]';
+% Rocker
+sus.L.init.FDSCH_0 = 1e-3*[1473.00 260.000 320.000]';
+sus.L.init.FRKDS_0 = 1e-3*[1484.68 324.508 157.743]';
+sus.L.init.FRKPR_0 = 1e-3*[1478.43 290.000 85.0000]';
+sus.L.init.FRKCH_0 = 1e-3*[1460.33 190.000 100.000]';
+sus.L.init.FPRUA_0 = 1e-3*[1515.00 492.000 275.000]';
+sus.L.init.FRKAL_0 = 1e-3*[1472.09 255.000 130.000]';
+sus.L.init.FALAB_0 = 1e-3*[1472.09 255.000 70.0000]';
+sus.L.init.FALAR_0 = 1e-3*[1392.09 255.000 70.0000]';
+
+
+
+%% Front left suspension kinematics
+
+uFUA = sus.L.init.FUACH1_0 - sus.L.init.FUACH2_0;         
+uFLA = sus.L.init.FLACH1_0 - sus.L.init.FLACH2_0;
+cFUA = (sus.L.init.FUACH1_0 + sus.L.init.FUACH2_0)/2;    
+cFLA = (sus.L.init.FLACH1_0 + sus.L.init.FLACH2_0)/2;
+
+vFUA = cFUA - sus.L.init.FUAUR_0;          
+vFUR = sus.L.init.FUAUR_0 - sus.L.init.FLAUR_0;       
+vFLA = sus.L.init.FLAUR_0 - cFLA;         
+vFCH = cFLA - cFUA;
+
+% New coordinate variables to be solved (8 Variables)
+FUAUR = sym('FUAUR_%d', [3 1]);
+FLAUR = sym('FLAUR_%d', [3 1]);
+syms bFUA bFLA  
+
+% Loop vector functions - (8 Variables, 7 Equations = 1 main CO, 7 secondary COs)
+f_FS = vpa([ rotateVector(vFLA,uFLA,bFLA) + (FUAUR-FLAUR) + rotateVector(vFUA,uFUA,bFUA) + vFCH;
+             rotatePoint(sus.L.init.FUAUR_0,uFUA,bFUA,cFUA) - FUAUR ;  %vpa(rotatePoint(sus.L.init.FLAUR_0,uFLA,bFLA,cFLA) - FLAUR) ;
+             norm(FUAUR-FLAUR) - norm(sus.L.init.FUAUR_0-sus.L.init.FLAUR_0)    ]);
+
+s_FS   = [FLAUR(1:2);   FUAUR;   bFUA; bFLA];
+s_FS_0 = [sus.L.init.FLAUR_0(1:2); sus.L.init.FUAUR_0; 0;    0];
+ 
+q_FS = [FLAUR(3)];
+          
+J_FS = jacobian(f_FS,s_FS);
+B_FS = -jacobian(f_FS,q_FS);
+K_FS = (J_FS\B_FS);          % K = simplify(inv(J)*B);         % ds/dt = K * dq/dt
+         
+
+%% Steering system kinematics
+
+uSR = [0 1 0]';
+
+% New coordinate variables to be solved (7 Variables)
+FSRTR = sym('FSRTR_%d', [3 1]);
+FTRUR = sym('FTRUR_%d', [3 1]);
+syms bSR
+
+% Loop vector functions - (13 Variables, 6 Equations = 7 main CO, 6 secondary COs)
+f_SS = vpa([ sus.L.init.FSRTR_0 + bSR*uSR - FSRTR;
+             norm(FTRUR-FSRTR) - norm(sus.L.init.FTRUR_0-sus.L.init.FSRTR_0);
+             norm(FLAUR-FTRUR) - norm(sus.L.init.FLAUR_0-sus.L.init.FTRUR_0);
+             norm(FUAUR-FTRUR) - norm(sus.L.init.FUAUR_0-sus.L.init.FTRUR_0)   ]);
+
+s_SS   = [FSRTR; FTRUR];
+s_SS_0 = [sus.L.init.FSRTR_0; sus.L.init.FTRUR_0];
+ 
+q_SS = [FLAUR; FUAUR; bSR];
+          
+J_SS = jacobian(f_SS,s_SS);
+B_SS = -jacobian(f_SS,q_SS);
+K_SS = (J_SS\B_SS);          % K = simplify(inv(J)*B);         % ds/dt = K * dq/dt         
+
+
+%% Front Wheel kinematics
+
+
+% New coordinate variables to be solved (6 Variables)
+uFWH = sym('uFWH_%d', [3 1]);     % Wheel rotation vector
+cFWH = sym('cFWH_%d', [3 1]);
+
+
+c0 = [DNA.DIN_CO(1) DNA.track/2+sus.L.setup.camber*tyr.unloadedRadius DNA.DIN_CO(3)]';
+v0 = rotateVector(rotateVector([0 1 0]',[1 0 0]',sus.L.setup.camber),[0 0 1]',-sus.L.setup.toe);                       
+
+g_FWH = matlabFunction(vpa([...
+    createTmatrixFunction_point(FLAUR,FTRUR,FUAUR,sus.L.init.FLAUR_0,sus.L.init.FTRUR_0,sus.L.init.FUAUR_0,c0);
+    createTmatrixFunction_vector(FLAUR,FTRUR,FUAUR,sus.L.init.FLAUR_0,sus.L.init.FTRUR_0,sus.L.init.FUAUR_0,v0) ]));
+
+s_FWH   = [cFWH; uFWH];
+q_FWH = [FLAUR; FUAUR; FTRUR];
+
+K_FWH = vpa(jacobian(g_FWH,q_FWH));
+
+
+%% Front tyre contact point
+
+% New coordinate variables to be solved (7 Variables)
+FTYRO = sym('FTYRO_%d', [3 1]);
+
+z = [0 0 1]';
+d_vector = cross(uFWH,cross(-z,uFWH));
+
+g_FTY = matlabFunction(vpa( d_vector/norm(d_vector)*tyr.unloadedRadius + cFWH ));
+
+s_FTY   = [FTYRO];
+q_FTY = [uFWH; cFWH];
+
+K_FTY = vpa(jacobian(g_FTY,q_FTY));
+         
+
+%% Push Rod kinematics
+
+FPRUA = sym('FPRUA_%d', [3 1]);
+
+% g_FPR = FPRUA
+g_FPR = matlabFunction(vpa([...
+    createTmatrixFunction_point(sus.L.init.FUACH1_0,sus.L.init.FUACH2_0,FUAUR,sus.L.init.FUACH1_0,sus.L.init.FUACH2_0,sus.L.init.FUAUR_0,sus.L.init.FPRUA_0) ]));
+
+s_FPR = FPRUA;
+q_FPR = FUAUR;
+
+K_FPR = vpa(jacobian(g_FPR,q_FPR));
+
+%% Rocker kinematics
+
+FRKPR = sym('FRKPR_%d', [3 1]);
+syms bRK
+
+uRK = cross((sus.L.init.FRKPR_0-sus.L.init.FRKCH_0),(sus.L.init.FRKDS_0-sus.L.init.FRKCH_0));
+
+f_FRK = vpa([ rotatePoint(sus.L.init.FRKPR_0,uRK,bRK,sus.L.init.FRKCH_0) - FRKPR;
+              norm(FRKPR-FPRUA)-norm(sus.L.init.FRKPR_0-sus.L.init.FPRUA_0) ]);
+
+s_FRK   = [FRKPR; bRK];
+s_FRK_0 = [sus.L.init.FRKPR_0; 0];
+q_FRK   = [FPRUA];
+
+J_FRK = jacobian(f_FRK,s_FRK);
+B_FRK = -jacobian(f_FRK,q_FRK);
+K_FRK = (J_FRK\B_FRK);
+
+%% Damper/Spring Kinematics
+
+FRKDS = sym('FRKDS_%d', [3 1]);
+
+% g_FDS = FRKDS
+g_FDS = matlabFunction(vpa( rotatePoint(sus.L.init.FRKDS_0,uRK,bRK,sus.L.init.FRKCH_0) ));
+
+s_FDS   = FRKDS;
+q_FDS   = bRK;
+
+K_FDS = vpa(jacobian(g_FDS,q_FDS));
+
+
+%% ARB Kinematics
+
+uAR = [0 1 0]';
+
+FRKAL = sym('FRKAL_%d', [3 1]);
+FALAB = sym('FALAB_%d', [3 1]);
+syms bAR
+
+f_FAR = vpa([ rotatePoint(sus.L.init.FRKAL_0,uRK,bRK,sus.L.init.FRKCH_0) - FRKAL;
+             norm(FALAB-FRKAL) - norm(sus.L.init.FALAB_0-sus.L.init.FRKAL_0);
+             rotatePoint(sus.L.init.FALAB_0,uAR,bAR,sus.L.init.FALAR_0) - FALAB ]);
+
+s_FAR   = [FRKAL; FALAB; bAR];
+s_FAR_0 = [sus.L.init.FRKAL_0; sus.L.init.FALAB_0; 0];
+ 
+q_FAR = [bRK];
+          
+J_FAR = jacobian(f_FAR,s_FAR);
+B_FAR = -jacobian(f_FAR,q_FAR);
+K_FAR = (J_FAR\B_FAR);          % K = simplify(inv(J)*B);         % ds/dt = K * dq/dt         
+
+
+
+fprintf('    Total calculation time of [K] matrices: %.1f s\n',toc)
+%% Calculate secundary coordinates
+
+dispstat('','init')
+dispstat('Calculating Time-step ','keepthis')
+ 
+q = [FLAUR(3); 
+     bSR];
+
+[FLAUR_3_val,bSR_val] = meshgrid(linspace(sus.L.init.FLAUR_0(3)+WH_stroke(1),sus.L.init.FLAUR_0(3)+WH_stroke(2),WH_steps), linspace(SR_stroke(1),SR_stroke(2),SR_steps));
+s_all = cat(3,FLAUR_3_val,bSR_val);
+s_all = syms2structArray(q,s_all);
+
+
+% FS
+tic
+for i = 1:SR_steps
+    for j = 1:WH_steps
+        toSolve = subs(f_FS, fieldnames(s_all), struct2array(s_all(i,j))' );      %     toSolve = subs(f_FS, q_FS, s_all(i).(char(q_FS)) );
+        s_FS_val(i,j) = vpasolve( toSolve, s_FS, s_FS_0);         
+        s_FS_0 = struct2array(s_FS_val(i,j))';
+        dispstat(sprintf('    Front Left suspension %d/%d: %.1fs',(i-1)*WH_steps+j,SR_steps*WH_steps,toc))
+    end
+end
+s_all = catstruct(s_all,s_FS_val);
+dispstat(' ','keepprev');
+
+% FSS
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        toSolve = subs(f_SS, fieldnames(s_all), struct2array(s_all(i,j))'); %     toSolve = subs(f_SS, [s_FS;q], [struct2array(s_FS_val(i))';struct2array(s_all(:,i))']);
+        s_SS_val(i,j) = vpasolve( toSolve, s_SS, s_SS_0);
+        s_SS_0 = struct2array(s_SS_val(i,j))';
+        dispstat(sprintf('    Front Steering System %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_all = catstruct(s_all,s_SS_val);
+dispstat(' ','keepprev');
+
+% FWH
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        s_FWH_0(i,j,:) = g_FWH(s_all(i,j).FLAUR_1, s_all(i,j).FLAUR_2, s_all(i,j).FLAUR_3, s_all(i,j).FTRUR_1, s_all(i,j).FTRUR_2, s_all(i,j).FTRUR_3, s_all(i,j).FUAUR_1, s_all(i,j).FUAUR_2, s_all(i,j).FUAUR_3 );   
+        dispstat(sprintf('    Front Left Wheel %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_FWH_val = syms2structArray(s_FWH,s_FWH_0);
+s_all = catstruct(s_all,s_FWH_val);
+dispstat(' ','keepprev');
+
+
+% FTY
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        s_FTY_0(i,j,:) = g_FTY(s_all(i,j).cFWH_1,s_all(i,j).cFWH_2,s_all(i,j).cFWH_3,s_all(i,j).uFWH_1,s_all(i,j).uFWH_2,s_all(i,j).uFWH_3);
+        dispstat(sprintf('    Front Left Tyre %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_FTY_val = syms2structArray(s_FTY,s_FTY_0);
+s_all = catstruct(s_all,s_FTY_val);
+dispstat(' ','keepprev');
+
+% FPR
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        s_FPR_0(i,j,:) = g_FPR(s_all(i,j).FUAUR_1,s_all(i,j).FUAUR_2,s_all(i,j).FUAUR_3);
+        dispstat(sprintf('    Front Push Rod %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_FPR_val = syms2structArray(s_FPR,s_FPR_0);
+s_all = catstruct(s_all,s_FPR_val);
+dispstat(' ','keepprev');
+
+% FRK
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        toSolve = subs(f_FRK, fieldnames(s_all), struct2array(s_all(i,j))');
+        s_FRK_val(i,j) = vpasolve( toSolve, s_FRK, s_FRK_0);
+        s_FRK_0 = struct2array(s_FRK_val(i,j))';
+        dispstat(sprintf('    Front Rocker %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_all = catstruct(s_all,s_FRK_val);
+dispstat(' ','keepprev');
+
+% FDS
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        s_FDS_0(i,j,:) = g_FDS(s_all(i,j).bRK);
+        dispstat(sprintf('    Front Damper/Spring %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_FDS_val = syms2structArray(s_FDS,s_FDS_0);
+s_all = catstruct(s_all,s_FDS_val);
+dispstat(' ','keepprev');
+
+
+% FAR
+tic
+for i = 1:size(s_all,1)
+    for j = 1:size(s_all,2)
+        toSolve = subs(f_FAR, fieldnames(s_all), struct2array(s_all(i,j))');
+        s_FAR_val(i,j) = vpasolve( toSolve, s_FAR, s_FAR_0);
+        s_FAR_0 = struct2array(s_FAR_val(i,j))';
+        dispstat(sprintf('    Front Rocker %d/%d: %.1fs',(i-1)*size(s_all,2)+j,numel(s_all),toc))
+    end
+end
+s_all = catstruct(s_all,s_FAR_val);
+dispstat(' ','keepprev');
+
+
+
+%% FRONT susPENSION SUMMARY
+
+fprintf('Converting structures and making simetry...\n'); tic;
+
+sus.L.kin = structarray2struct(s_all);
+
+sus.R = sus.L;
+
+variables2inverse = {'bSR','FLAUR_2','FUAUR_2','cFWH_2','FPRUA_2','FRKDS_2','FRKPR_2','FSRTR_2','FTRUR_2','FTYRO_2','FUAUR_2','uFWH_2','FALAB_2','FRKAL_2'};
+for i=1:numel(variables2inverse)
+    sus.R.kin.(variables2inverse{i}) = -sus.L.kin.(variables2inverse{i});
+end
+init2inverse = {'FUACH1_0','FUACH2_0','FLACH1_0','FLACH2_0','FDSCH_0','FRKCH_0','FALAR_0'};
+for i=1:numel(init2inverse)
+    sus.R.init.(init2inverse{i}) = [1 0 0;0 -1 0; 0 0 1]*sus.L.init.(init2inverse{i});    % Inverse signal of y coordinate
+end
+
+fprintf('    Finished %.1fs\n',toc);
+
+%% Plot mechanism
+
+fig = figure('Color','w');
+xlabel('x axis')
+ylabel('y axis')
+zlabel('z axis')
+
+axis equal
+xlim([1.2 2])
+ylim([-0.9 0.9])
+zlim([-0.1 0.6])
+
+% view(3)
+az = 210;
+el = 45;
+view(az, el);
+
+bSR_slider = 0;
+FLAUR_3_slider = 0;
+hscrollbar_bSR   = uicontrol('style','slider','units','normalized','position',[.05 0 0.95 .05],'callback', @(src,evt) assignin('base','bSR_slider',src.Value) );
+hscrollbar_FLAUR = uicontrol('style','slider','units','normalized','position',[0 .05 .05 0.95],'callback',@(src,evt) assignin('base','FLAUR_3_slider',src.Value)  );
+
+
+init=true;
+susHandleL = nan;
+susHandleR = nan;
+while true
+% for i = [1:size(s_all,2) size(s_all,2):-1:1]
+    tic
+    Xq = FLAUR_3_slider*(WH_stroke(2)-WH_stroke(1)) + sus.L.init.FLAUR_0(3)+WH_stroke(1);
+    Yq = bSR_slider*(SR_stroke(2)-SR_stroke(1)) + SR_stroke(1);
+    
+	susHandleL = plotSuspension(fig, susHandleL, init, tyr, sus.L, 'FLAUR_3',Xq,'bSR',Yq );
+    susHandleR = plotSuspension(fig, susHandleR, init, tyr, sus.R, 'FLAUR_3',Xq,'bSR',Yq );
+    refresh();
+    drawnow();
+    if init
+        init = false;
+    end  
+% end
+end
