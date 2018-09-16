@@ -5,8 +5,8 @@ addpath(genpath(pwd));
 
 %% User Settings
 
-load_kinematics = true;
-save_kinematics = false;
+load_kinematics = false;
+save_kinematics = true;
 
 conf.solver         = 'ode1';                       % 'ode1', 'ode2', 'ode45'
 conf.time_step      = 0.001;                        % simulation time step
@@ -115,24 +115,16 @@ if ~load_kinematics
 
     % Create Vehicle
     veh = veh(DNA, veh_sus_fl, veh_sus_fr, veh_sus_rl, veh_sus_rr);
-    
-    if save_kinematics
-        fprintf('Saving Kinematics...')
-        save('vehicles/veh.mat', 'veh');
-        fprintf('OK\n')
-    end
+
+    save('vehicles/veh.mat', 'veh')
 else
-    fprintf('Loading Kinematics...')
-    veh = open('vehicles/veh.mat');
-    veh = veh.veh;
-    fprintf('OK\n')
+    
 end
 
 veh.plotKinAnalysis;
-if false
-    veh.sus_fl.compare_K_analytic_numeric('cWH_3');
-    veh.sus_fl.compare_K_analytic_numeric('bDS');
-end
+veh_sus_fl.compare_K_analytic_numeric('cWH_3');
+veh_sus_fl.compare_K_analytic_numeric('bDS');
+
 
 %% Calculate Vehicle Dynamics
 

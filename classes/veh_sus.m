@@ -69,6 +69,7 @@ classdef veh_sus < matlab.mixin.Copyable
             end
         end
     end
+    
     methods
         function obj = veh_sus(init, setup, unsMass, veh_tyr, WH_stroke, WH_steps, SR_stroke, SR_steps)
             obj.init    = init;
@@ -144,6 +145,7 @@ classdef veh_sus < matlab.mixin.Copyable
                     multiWaitbar('Comparing K matrices Analytical/Numeric', 'Value', (j+(i-1)*size(q1,2)) / numel(q1), 'Color', 'g' );
                 end
             end
+            multiWaitbar( 'CloseAll' );
             K1_anl_ref = interp2(q1,q2,K_anl(:,:,1),q1_ref,q2_ref,'cubic');
             K2_anl_ref = interp2(q1,q2,K_anl(:,:,2),q1_ref,q2_ref,'cubic');
             % ANALYTIC
@@ -296,7 +298,7 @@ classdef veh_sus < matlab.mixin.Copyable
 
             RKAL = sym('RKAL_%d', [3 1]);
             ALAB = sym('ALAB_%d', [3 1]);
-            syms bAR
+            bAR = sym('bAR'); % syms bAR
 
             f_AR = [ rotatePoint(obj.init.RKAL_0,uRK,bRK,obj.init.RKCH_0) - RKAL;
                      norm(ALAB-RKAL) - norm(obj.init.ALAB_0-obj.init.RKAL_0);
@@ -357,13 +359,6 @@ classdef veh_sus < matlab.mixin.Copyable
                 obj.kin.(char(names(i))) = val(:,:,i);
             end
 %             multiWaitbar( 'CloseAll' );
-
-        end
-        
-        function generate_Kmatrix_numeric(obj)
-            for i=1:numel(obj.s)
-                
-            end
         end
             
         function new = mirror(obj)

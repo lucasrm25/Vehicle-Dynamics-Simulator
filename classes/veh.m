@@ -135,22 +135,22 @@ classdef veh < matlab.mixin.Copyable
             
             v_fl_cWH_dq =  [ obj.sus_fl.reshapefun(obj.sus_fl.Kmatrix.cWH_1, q, struct2array(obj.sus_fl.s_prefix).') ;
                              obj.sus_fl.reshapefun(obj.sus_fl.Kmatrix.cWH_2, q, struct2array(obj.sus_fl.s_prefix).') ;
-                             obj.sus_fl.reshapefun(obj.sus_fl.Kmatrix.cWH_2, q, struct2array(obj.sus_fl.s_prefix).') ];
+                             obj.sus_fl.reshapefun(obj.sus_fl.Kmatrix.cWH_3, q, struct2array(obj.sus_fl.s_prefix).') ];
             v_fl_cWH_ddq = diff2(v_fl_cWH_dq,q);
 
             v_fr_cWH_dq =  [ obj.sus_fr.reshapefun(obj.sus_fr.Kmatrix.cWH_1, q, struct2array(obj.sus_fr.s_prefix).') ;
                              obj.sus_fr.reshapefun(obj.sus_fr.Kmatrix.cWH_2, q, struct2array(obj.sus_fr.s_prefix).') ;
-                             obj.sus_fr.reshapefun(obj.sus_fr.Kmatrix.cWH_2, q, struct2array(obj.sus_fr.s_prefix).') ];
+                             obj.sus_fr.reshapefun(obj.sus_fr.Kmatrix.cWH_3, q, struct2array(obj.sus_fr.s_prefix).') ];
             v_fr_cWH_ddq = diff2(v_fr_cWH_dq,q);
 
             v_rl_cWH_dq =  [ obj.sus_rl.reshapefun(obj.sus_rl.Kmatrix.cWH_1, q, struct2array(obj.sus_rl.s_prefix).') ;
                              obj.sus_rl.reshapefun(obj.sus_rl.Kmatrix.cWH_2, q, struct2array(obj.sus_rl.s_prefix).') ;
-                             obj.sus_rl.reshapefun(obj.sus_rl.Kmatrix.cWH_2, q, struct2array(obj.sus_rl.s_prefix).') ];
+                             obj.sus_rl.reshapefun(obj.sus_rl.Kmatrix.cWH_3, q, struct2array(obj.sus_rl.s_prefix).') ];
             v_rl_cWH_ddq = diff2(v_rl_cWH_dq,q);
 
             v_rr_cWH_dq =  [ obj.sus_rr.reshapefun(obj.sus_rr.Kmatrix.cWH_1, q, struct2array(obj.sus_rr.s_prefix).') ;
                              obj.sus_rr.reshapefun(obj.sus_rr.Kmatrix.cWH_2, q, struct2array(obj.sus_rr.s_prefix).') ;
-                             obj.sus_rr.reshapefun(obj.sus_rr.Kmatrix.cWH_2, q, struct2array(obj.sus_rr.s_prefix).') ];
+                             obj.sus_rr.reshapefun(obj.sus_rr.Kmatrix.cWH_3, q, struct2array(obj.sus_rr.s_prefix).') ];
             v_rr_cWH_ddq = diff2(v_rr_cWH_dq,q);
 
 
@@ -299,7 +299,8 @@ classdef veh < matlab.mixin.Copyable
                           (e_pos_dq{i}   +   e_T_v_dq{i} * v_rl_TYRO   +   e_T_v * v_rl_TYRO_dq(:,i)).' * e_rl_Ftyre + ...
                           (e_pos_dq{i}   +   e_T_v_dq{i} * v_rr_TYRO   +   e_T_v * v_rr_TYRO_dq(:,i)).' * e_rr_Ftyre ;
 
-                Lagrange{i} = Ekin_dqp_dt{i} - Ekin_dq{i} + Epot_dq{i} - Qnc{i};
+%                 Lagrange{i} = Ekin_dqp_dt{i} - Ekin_dq{i} + Epot_dq{i} - Qnc{i};   ??????
+                Lagrange{i} = Ekin_dqp_dt{i} - Epot_dq{i} - Qnc{i};
 
                 parfor_progress(pwd);
             end
@@ -343,10 +344,10 @@ classdef veh < matlab.mixin.Copyable
 %             fprintf('    Reducing differential index...\n'); tic;
 %             isLowIndex = isLowIndexDAE(Lagrange_red,q_red)
             
-            obj.dynamicFunction = daeFunction(Lagrange_sym, q, ...
-                                              e_fl_Ftyre,e_fr_Ftyre,e_rl_Ftyre,e_rr_Ftyre,...
-                                              s_fl,s_fr,s_rl,s_rr,...
-                                              'File', 'veh_DAEfun');
+%             obj.dynamicFunction = daeFunction(Lagrange_sym, q, ...
+%                                               e_fl_Ftyre,e_fr_Ftyre,e_rl_Ftyre,e_rr_Ftyre,...
+%                                               s_fl,s_fr,s_rl,s_rr,...
+%                                               'File', 'veh_DAEfun');
 
 
             obj.dynamicFunction = daeFunction(Lagrange_red, q_red, ...
