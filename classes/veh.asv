@@ -293,7 +293,7 @@ classdef veh < matlab.mixin.Copyable
 
 
                 Ekin_dqp_dt{i} = 0.5 * obj.sus_fl.unsMass * ( e_fl_cWHp_dqp_p{i}.' * e_fl_cWHp + e_fl_cWHp_dqp{i}.' * e_fl_cWHpp   + ...
-                                                              e_fl_cWHpp.' * e_fl_cWHp_dqp{i}  + e_fl_cWHp.' * e_fl_cWHp_dqp_p{i}) + ...
+                                                              e_fl_cWHpp' * e_fl_cWHp_dqp{i}  + e_fl_cWHp.' * e_fl_cWHp_dqp_p{i}) + ...
                                  0.5 * obj.sus_fr.unsMass * ( e_fr_cWHp_dqp_p{i}.' * e_fr_cWHp + e_fr_cWHp_dqp{i}.' * e_fr_cWHpp   + ...
                                                               e_fr_cWHpp.' * e_fr_cWHp_dqp{i}  + e_fr_cWHp.' * e_fr_cWHp_dqp_p{i}) + ... 
                                  0.5 * obj.sus_rl.unsMass * ( e_rl_cWHp_dqp_p{i}.' * e_rl_cWHp + e_rl_cWHp_dqp{i}.' * e_rl_cWHpp   + ...
@@ -338,13 +338,16 @@ classdef veh < matlab.mixin.Copyable
             Lagrange_sym = [Lagrange{:}];
             Lagrange_sym = Lagrange_sym(t).';
             toc
-        
+            
+            
 %             [eqsBlocks,varsBlocks] = findDecoupledBlocks(Lagrange_sym,q)           
-                     
-            fprintf('    Reducing differential order...\n');
+            
+            
+                        
+            fprintf('    Reducing differential order...\n'); tic;
             [Lagrange_red, q_red] = reduceDifferentialOrder(Lagrange_sym, q);
             
-            fprintf('    Calculating mass matrix...\n');
+            
             [Mred,Fred] = massMatrixForm(Lagrange_red,q_red);
             
             s_fl = cell2sym(struct2cell(obj.sus_fl.s_prefix));
@@ -355,12 +358,13 @@ classdef veh < matlab.mixin.Copyable
 %             fprintf('    Reducing differential index...\n'); tic;
 %             isLowIndex = isLowIndexDAE(Lagrange_red,q_red)
 
-%             obj.dynamicFunction = daeFunction(Lagrange_red, q_red, ...
-%                                               e_fl_Ftyre,e_fr_Ftyre,e_rl_Ftyre,e_rr_Ftyre,...
-%                                               s_fl,s_fr,s_rl,s_rr,...
-%                                               'File', 'veh_DAEfun');           
-%             tspan = [0 4*logspace(-6,6)];
-%             [t,y] = ode15i(@(t,y,yp) veh.dynamicFunction(t,y,yp, q, s_fl, s_fr, s_rl, s_rr, e_fl_Ftyre, e_fr_Ftyre, e_rl_Ftyre, e_rr_Ftyre) ,tspan,y0,yp0,options);
+            obj.dynamicFunction = daeFunction(Lagrange_red, q_red, ...
+                                              e_fl_Ftyre,e_fr_Ftyre,e_rl_Ftyre,e_rr_Ftyre,...
+                                              s_fl,s_fr,s_rl,s_rr,...
+                                              'File', 'veh_DAEfun');
+            
+            tspan = [0 4*logspace(-6,6)];
+            [t,y] = ode15i(@(t,y,yp) veh.dynamicFunction(t,y,yp, q, s_fl, s_fr, s_rl, s_rr, e_fl_Ftyre, e_fr_Ftyre, e_rl_Ftyre, e_rr_Ftyre) ,tspan,y0,yp0,options);
             
         end
         

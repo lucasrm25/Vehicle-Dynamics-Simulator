@@ -6,7 +6,7 @@ addpath(genpath(pwd));
 %% User Settings
 
 load_kinematics = true;
-save_kinematics = false;
+save_kinematics = ~load_kinematics;
 
 conf.solver         = 'ode1';                       % 'ode1', 'ode2', 'ode45'
 conf.time_step      = 0.001;                        % simulation time step
@@ -128,7 +128,7 @@ else
     fprintf('OK\n')
 end
 
-veh.plotKinAnalysis;
+% veh.plotKinAnalysis;
 if false
     veh.sus_fl.compare_K_analytic_numeric('cWH_3');
     veh.sus_fl.compare_K_analytic_numeric('bDS');
