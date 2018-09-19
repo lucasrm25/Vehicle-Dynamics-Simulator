@@ -352,6 +352,13 @@ classdef veh < matlab.mixin.Copyable
             s_rl = cell2sym(struct2cell(obj.sus_rl.s_prefix));
             s_rr = cell2sym(struct2cell(obj.sus_rr.s_prefix));
             
+            
+            % PREPARE DAEs WITH MATLAB FUNCTION (SEE massMatrixForm doc)...
+            % CALL ode15s instead of ode15i, as now we are dealing with
+            % explicit DAEs
+            
+            
+            
 %             fprintf('    Reducing differential index...\n'); tic;
 %             isLowIndex = isLowIndexDAE(Lagrange_red,q_red)
 
@@ -364,10 +371,8 @@ classdef veh < matlab.mixin.Copyable
             
         end
         
-        function plotKinAnalysis(obj)            
-            
-            fun_linspace = @(x,n) linspace(min(min(obj.sus_fl.kin.(x))),max(max(obj.sus_fl.kin.(x))),n);             
-            
+        function plotKinAnalysis(obj)                        
+            fun_linspace = @(x,n) linspace(min(min(obj.sus_fl.kin.(x))),max(max(obj.sus_fl.kin.(x))),n);                        
             figure('Color','white')
             
             % SR vs toe vs heave
