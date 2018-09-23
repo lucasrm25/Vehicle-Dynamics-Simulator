@@ -169,7 +169,7 @@ classdef veh_sus < matlab.mixin.Copyable
 %             legend({'Numeric','Analytic'})
         end
         
-        function calculateKinematics(obj,WH_stroke, WH_steps, SR_stroke, SR_steps)
+        function calculateKinematics(obj, WH_stroke, WH_steps, SR_stroke, SR_steps)
 
             multiWaitbar( 'CloseAll' );
             digits(4)

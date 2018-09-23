@@ -1,6 +1,6 @@
 % Derivate matrix 'f_in' in respect to each cell element of 'derivator'
 %
-% 'derivator' is a cell array containing all the derivators
+% 'derivator' is an array containing all the derivators
 % 'f_out' is a cell array with the same size of 'derivator'
 
 function [f_out] = diff2(f_in,derivator)

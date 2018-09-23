@@ -21,7 +21,6 @@ conf.maneuver = 'SWD';
 
 if ~load_kinematics
     % % % % % % % % % % % % % % read_vehicle(conf)
-
     env.grav = [0 0 -9.8]';         % [m/s2]
 
     % Vehicle Parameters
@@ -37,7 +36,6 @@ if ~load_kinematics
     tyr.width             = 0.220;        % [m]
     tyr.compressionLength = 0.08;         % [m]
     tyr.stiffness         = 500000;       % [N/m] 
-
 
     % Mass
     susFL.unsMass = 2;
@@ -137,6 +135,7 @@ end
 %% Calculate Vehicle Dynamics
 
 veh.calculateDynamics;
+veh.sim()
 
 
 % Plot K matrices to file !!!
@@ -148,6 +147,8 @@ veh.calculateDynamics;
 
 
 %% Plot
+
+movie = false;
 
 fig = figure('Color','w');
 xlabel('x axis')
@@ -172,36 +173,44 @@ hscrollbar_FLAUR  = uicontrol('style','slider','units','normalized','position',[
 hscrollbar_RLAUR  = uicontrol('style','slider','units','normalized','position',[0.95 .05 .05 0.95],'callback',@(src,evt) assignin('base','RLAUR_3_slider',src.Value) );
 
 
+WH_stroke = [-2 2]*0.0254;
+SR_stroke = [-0.02 0.02];
+
+loops = 40;
+F(loops) = struct('cdata',[],'colormap',[]);
 init=true;
-while true
-for i = linspace(0,2*pi,60)
-    
-    FXq = veh_sus_fl.init.LAUR_0(3)+WH_stroke(1) + (WH_stroke(2)-WH_stroke(1))*(sin(i)/2+0.5); %*FLAUR_3_slider;
-    FYq = -(SR_stroke(1) + (SR_stroke(2)-SR_stroke(1))*bSR_slider);   
-    RXq = veh_sus_rl.init.LAUR_0(3)+WH_stroke(1) + (WH_stroke(2)-WH_stroke(1))*(sin(i+pi/2)/2+0.5); %*RLAUR_3_slider;
+% while true
+for i = 1:loops
+    FXq = veh.sus_fl.init.LAUR_0(3)+WH_stroke(1) + (WH_stroke(2)-WH_stroke(1))*(sin(i/loops*2*pi)/2+0.5); %*FLAUR_3_slider;
+    FYq = -(SR_stroke(1) + (SR_stroke(2)-SR_stroke(1))*bSR_slider);
+    RXq = veh.sus_rl.init.LAUR_0(3)+WH_stroke(1) + (WH_stroke(2)-WH_stroke(1))*(sin(i/loops*2*pi+pi/2)/2+0.5); %*RLAUR_3_slider;
     RYq = 0;
     
     q_tm1 = [0 0 0   0 0 0  FXq FXq RXq RXq   FYq RYq ];
     
+    veh.sus_fl.q_val = q_tm1([7 11])';
+    veh.sus_fr.q_val = q_tm1([8 11])';
+    veh.sus_rl.q_val = q_tm1([9 12])';
+    veh.sus_rr.q_val = q_tm1([10 12])';
 
-    veh_sus_fl.q_val = q_tm1([7 11])';
-    veh_sus_fr.q_val = q_tm1([8 11])';
-    veh_sus_rl.q_val = q_tm1([9 12])';
-    veh_sus_rr.q_val = q_tm1([10 12])';
-
-    veh_sus_fl.plot(fig,init)
-    veh_sus_fr.plot(fig,init)
-	veh_sus_rl.plot(fig,init)
-    veh_sus_rr.plot(fig,init)
-
-    
+    veh.sus_fl.plot(fig,init)
+    veh.sus_fr.plot(fig,init)
+	veh.sus_rl.plot(fig,init)
+    veh.sus_rr.plot(fig,init)
+   
+%     axis vis3d
     drawnow();
-    if init
-        init = false;
-    end  
+    if movie
+        F(i) = getframe(gcf);
+    end
+    init = false;
 end
-end
+% end
 
+if movie
+    fig = figure;
+    movie(fig,F,2);
+end
 
 %% Start Maneuver
 
