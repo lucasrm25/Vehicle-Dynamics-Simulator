@@ -135,7 +135,7 @@ end
 %% Calculate Vehicle Dynamics
 
 veh.calculateDynamics;
-veh.sim()
+% veh.sim()
 
 
 % Plot K matrices to file !!!

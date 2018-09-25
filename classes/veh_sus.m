@@ -46,7 +46,7 @@ classdef veh_sus < matlab.mixin.Copyable
         Lmatrix_num
         
         reshapefun
-
+        reshapematrix
     end
     properties (GetAccess=private)
         pHandles
@@ -84,6 +84,7 @@ classdef veh_sus < matlab.mixin.Copyable
             shift(1,new_positions(1)) = 1;
             shift(2,new_positions(2)) = 1;
             obj.reshapefun = @(fun,q,s) vpa(fun(q(new_positions),s))*shift;
+            obj.reshapematrix = @(matrix) matrix*shift;
         end
         
         function Vq = getKin(obj, XFieldName, Xq, YFieldName, Yq, fieldNames)   
@@ -108,13 +109,20 @@ classdef veh_sus < matlab.mixin.Copyable
             Vq = getKin(obj, obj.q(1), q(1), obj.q(2), q(2), fieldNames);
         end
         
+        function K = get_K_matrices(obj, q, s, fieldNames)
+            K = zeros([numel(fieldNames), 2]);
+            for i=1:numel(fieldNames)
+                K(i,:) = obj.Kmatrix.(char(fieldNames(i)))(q,s);
+            end
+            K = obj.reshapematrix(K);
+        end
+        
         function obj = set_prefix(obj, prefix)
             if ~isempty(obj.s)
                 for i=1:numel(obj.s)
                     obj.s_prefix.(char(obj.s(i))) = sym(strcat(prefix,char(obj.s(i))));
                 end
-            end
-            
+            end            
         end
         
         function compare_K_analytic_numeric(obj,fieldname)
