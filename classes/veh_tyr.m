@@ -18,8 +18,8 @@ classdef veh_tyr < matlab.mixin.Copyable
         end
         
         function vec = plot(obj, uWH, cWH)
-            N_TETA = 30;
-            N_PHI = 30;
+            N_TETA = 10;
+            N_PHI = 20;
 
 
             uInitial = [0 0 1]';

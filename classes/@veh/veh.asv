@@ -70,7 +70,7 @@ classdef veh < matlab.mixin.Copyable
             obj.DNA = DNA;
         end
 
-        function sim(obj, q0, qp0)
+        function sim(obj, q0, qp0) %#ok<INUSD>
 %             https://www.mathworks.com/help/symbolic/equation-solving.html
 %             https://www.mathworks.com/help/symbolic/equation-solving.html
 %             https://www.mathworks.com/help/symbolic/solve-differential-algebraic-equations.html
@@ -108,7 +108,7 @@ classdef veh < matlab.mixin.Copyable
             syms e_ang_phi(t) e_ang_teta(t) e_ang_psi(t)      e_pos_x(t) e_pos_y(t) e_pos_z(t)
             syms v_fl_LAUR_3(t) v_fr_LAUR_3(t) v_rl_LAUR_3(t) v_rr_LAUR_3(t)
             syms v_fl_bSR(t) v_fr_bSR(t)
-            q     = [e_ang_phi e_ang_teta e_ang_psi e_pos_x e_pos_y e_pos_z v_fl_LAUR_3 v_fr_LAUR_3 v_rl_LAUR_3 v_rr_LAUR_3 v_fl_bSR v_fr_bSR].';
+            q     = [e_ang_phi e_ang_teta e_ang_psi e_pos_x e_pos_y e_pos_z v_fl_LAUR_3 v_fr_LAUR_3 v_rl_LAUR_3 v_rr_LAUR_3 v_fl_bSR v_fr_bSR].'; %#ok<*PROP>
             q     = q(t);       % Convert symfun to syms array
             qp    = diff(q,t);
             qpp   = diff(qp,t);
@@ -242,21 +242,37 @@ classdef veh < matlab.mixin.Copyable
 
             
             fprintf('    Calculating differential equations...\n'); tic;
- 
             if isempty(gcp('nocreate')) parpool(4); end %#ok<*SEPEX>
             parfor_progress(pwd,numel(q));
+            
+            % avoid parfor overhead
+            grav = obj.grav;
+            DNA = obj.DNA;
+            sus_fl.init = obj.sus_fl.init;
+            sus_fr.init = obj.sus_fr.init;
+            sus_rl.init = obj.sus_rl.init;
+            sus_rr.init = obj.sus_rr.init;
+            sus_fl.setup = obj.sus_fl.setup;
+            sus_fr.setup = obj.sus_fr.setup;
+            sus_rl.setup = obj.sus_rl.setup;
+            sus_rr.setup = obj.sus_rr.setup;
+            sus_fl.unsMass = obj.sus_fl.unsMass;
+            sus_fr.unsMass = obj.sus_fr.unsMass;
+            sus_rl.unsMass = obj.sus_rl.unsMass;
+            sus_rr.unsMass = obj.sus_rr.unsMass;
+            
             parfor i=1:numel(q)              
                 % We could have easily done diff(Epot, q). But here we are not considering S as q dependent
                 % so we must make the calculations by hand
-                Epot_dq{i} = vpa(  -obj.sus_fl.unsMass * obj.grav' * (e_T_v_dq{i} * v_fl_cWH  + e_T_v * v_fl_cWH_dq(:,i) + e_pos_dq{i}) + ...
-                                   -obj.sus_fr.unsMass * obj.grav' * (e_T_v_dq{i} * v_fr_cWH  + e_T_v * v_fr_cWH_dq(:,i) + e_pos_dq{i}) + ...
-                                   -obj.sus_rl.unsMass * obj.grav' * (e_T_v_dq{i} * v_rl_cWH  + e_T_v * v_rl_cWH_dq(:,i) + e_pos_dq{i}) + ...
-                                   -obj.sus_rr.unsMass * obj.grav' * (e_T_v_dq{i} * v_rr_cWH  + e_T_v * v_rr_cWH_dq(:,i) + e_pos_dq{i}) + ...
-                                   -obj.DNA.susMass    * obj.grav' * (e_T_v_dq{i} * obj.DNA.CG_s                         + e_pos_dq{i}) + ...
-                                   obj.sus_fl.setup.kspring   * (v_fl_bDS - norm(obj.sus_fl.init.RKDS_0-obj.sus_fl.init.DSCH_0)) * v_fl_bDS_dq(:,i) + ...
-                                   obj.sus_fr.setup.kspring   * (v_fr_bDS - norm(obj.sus_fr.init.RKDS_0-obj.sus_fr.init.DSCH_0)) * v_fr_bDS_dq(:,i) + ...
-                                   obj.sus_rl.setup.kspring   * (v_rl_bDS - norm(obj.sus_rl.init.RKDS_0-obj.sus_rl.init.DSCH_0)) * v_rl_bDS_dq(:,i) + ...
-                                   obj.sus_rr.setup.kspring   * (v_rr_bDS - norm(obj.sus_rr.init.RKDS_0-obj.sus_rr.init.DSCH_0)) * v_rr_bDS_dq(:,i) );
+                Epot_dq{i} = vpa(  -sus_fl.unsMass * grav' * (e_T_v_dq{i} * v_fl_cWH  + e_T_v * v_fl_cWH_dq(:,i) + e_pos_dq{i}) + ...
+                                   -sus_fr.unsMass * grav' * (e_T_v_dq{i} * v_fr_cWH  + e_T_v * v_fr_cWH_dq(:,i) + e_pos_dq{i}) + ...
+                                   -sus_rl.unsMass * grav' * (e_T_v_dq{i} * v_rl_cWH  + e_T_v * v_rl_cWH_dq(:,i) + e_pos_dq{i}) + ...
+                                   -sus_rr.unsMass * grav' * (e_T_v_dq{i} * v_rr_cWH  + e_T_v * v_rr_cWH_dq(:,i) + e_pos_dq{i}) + ...
+                                   -DNA.susMass    * grav' * (e_T_v_dq{i} * DNA.CG_s                         + e_pos_dq{i}) + ...
+                                   sus_fl.setup.kspring   * (v_fl_bDS - norm(sus_fl.init.RKDS_0-sus_fl.init.DSCH_0)) * v_fl_bDS_dq(:,i) + ...
+                                   sus_fr.setup.kspring   * (v_fr_bDS - norm(sus_fr.init.RKDS_0-sus_fr.init.DSCH_0)) * v_fr_bDS_dq(:,i) + ...
+                                   sus_rl.setup.kspring   * (v_rl_bDS - norm(sus_rl.init.RKDS_0-sus_rl.init.DSCH_0)) * v_rl_bDS_dq(:,i) + ...
+                                   sus_rr.setup.kspring   * (v_rr_bDS - norm(sus_rr.init.RKDS_0-sus_rr.init.DSCH_0)) * v_rr_bDS_dq(:,i) ); %#ok<*PFOUS>
 
                 e_fl_cWHp_dq{i} = e_posp_dq{i} + e_T_v_dq{i} * ( v_fl_cWH_dq     * qp + cross(v_angp,v_fl_cWH) ) ...
                                                + e_T_v       * ( v_fl_cWH_ddq{i} * qp + cross(v_angp_dq{i},v_fl_cWH) + cross(v_angp,v_fl_cWH_dq(:,i))   );
@@ -266,22 +282,22 @@ classdef veh < matlab.mixin.Copyable
                                                + e_T_v       * ( v_rl_cWH_ddq{i} * qp + cross(v_angp_dq{i},v_rl_cWH) + cross(v_angp,v_rl_cWH_dq(:,i))   );
                 e_rr_cWHp_dq{i} = e_posp_dq{i} + e_T_v_dq{i} * ( v_rr_cWH_dq     * qp + cross(v_angp,v_rr_cWH) ) ...
                                                + e_T_v       * ( v_rr_cWH_ddq{i} * qp + cross(v_angp_dq{i},v_rr_cWH) + cross(v_angp,v_rr_cWH_dq(:,i))   );
-                e_CGp_dq{i}     = e_posp_dq{i} + e_T_v_dq{i} * (                        cross(v_angp,obj.DNA.CG_s)         ) ...
-                                               + e_T_v       * (                        cross(v_angp_dq{i},obj.DNA.CG_s)   );
+                e_CGp_dq{i}     = e_posp_dq{i} + e_T_v_dq{i} * (                        cross(v_angp,DNA.CG_s)         ) ...
+                                               + e_T_v       * (                        cross(v_angp_dq{i},DNA.CG_s)   );
 
-                Ekin_dq{i} = 0.5 * e_fl_cWHp_dq{i}.'  * obj.sus_fl.unsMass * e_fl_cWHp  + 0.5 * e_fl_cWHp.' * obj.sus_fl.unsMass * e_fl_cWHp_dq{i}  + ...
-                             0.5 * e_fr_cWHp_dq{i}.'  * obj.sus_fr.unsMass * e_fr_cWHp  + 0.5 * e_fr_cWHp.' * obj.sus_fr.unsMass * e_fr_cWHp_dq{i}  + ...
-                             0.5 * e_rl_cWHp_dq{i}.'  * obj.sus_rl.unsMass * e_rl_cWHp  + 0.5 * e_rl_cWHp.' * obj.sus_rl.unsMass * e_rl_cWHp_dq{i}  + ...
-                             0.5 * e_rr_cWHp_dq{i}.'  * obj.sus_rr.unsMass * e_rr_cWHp  + 0.5 * e_rr_cWHp.' * obj.sus_rr.unsMass * e_rr_cWHp_dq{i}  + ...
-                             0.5 * e_CGp_dq{i}.'      * obj.DNA.susMass * e_CGp      + 0.5 * e_CGp.'     * obj.DNA.susMass * e_CGp_dq{i}      + ...
-                      diff2( 0.5 * v_angp.' * e_T_v.' * obj.DNA.CG_I    * e_T_v * v_angp , q(i));
+                Ekin_dq{i} = 0.5 * e_fl_cWHp_dq{i}.'  * sus_fl.unsMass * e_fl_cWHp  + 0.5 * e_fl_cWHp.' * sus_fl.unsMass * e_fl_cWHp_dq{i}  + ...
+                             0.5 * e_fr_cWHp_dq{i}.'  * sus_fr.unsMass * e_fr_cWHp  + 0.5 * e_fr_cWHp.' * sus_fr.unsMass * e_fr_cWHp_dq{i}  + ...
+                             0.5 * e_rl_cWHp_dq{i}.'  * sus_rl.unsMass * e_rl_cWHp  + 0.5 * e_rl_cWHp.' * sus_rl.unsMass * e_rl_cWHp_dq{i}  + ...
+                             0.5 * e_rr_cWHp_dq{i}.'  * sus_rr.unsMass * e_rr_cWHp  + 0.5 * e_rr_cWHp.' * sus_rr.unsMass * e_rr_cWHp_dq{i}  + ...
+                             0.5 * e_CGp_dq{i}.'      * DNA.susMass * e_CGp      + 0.5 * e_CGp.'     * DNA.susMass * e_CGp_dq{i}      + ...
+                      diff2( 0.5 * v_angp.' * e_T_v.' * DNA.CG_I    * e_T_v * v_angp , q(i));
 
 
                 e_fl_cWHp_dqp{i} = e_posp_dqp{i} + e_T_v * ( v_fl_cWH_dq(:,i) + cross(v_angp_dqp{i},v_fl_cWH) );
                 e_fr_cWHp_dqp{i} = e_posp_dqp{i} + e_T_v * ( v_fr_cWH_dq(:,i) + cross(v_angp_dqp{i},v_fr_cWH) );
                 e_rl_cWHp_dqp{i} = e_posp_dqp{i} + e_T_v * ( v_rl_cWH_dq(:,i) + cross(v_angp_dqp{i},v_rl_cWH) );
                 e_rr_cWHp_dqp{i} = e_posp_dqp{i} + e_T_v * ( v_rr_cWH_dq(:,i) + cross(v_angp_dqp{i},v_rr_cWH) );    
-                e_CGp_dqp{i}     = e_posp_dqp{i} + e_T_v * (                    cross(v_angp_dqp{i},obj.DNA.CG_s) );
+                e_CGp_dqp{i}     = e_posp_dqp{i} + e_T_v * (                    cross(v_angp_dqp{i},DNA.CG_s) );
 
                 e_fl_cWHp_dqp_p{i} =  e_T_v_p * ( v_fl_cWH_dq(:,i)   + cross(v_angp_dqp{i},v_fl_cWH) ) + ...
                                       e_T_v   * ( v_fl_cWH_dq_p(:,i) + cross(v_angp_dqp_p{i},v_fl_cWH) + cross(v_angp_dqp{i},v_fl_cWH_dq*qp) );
@@ -291,22 +307,22 @@ classdef veh < matlab.mixin.Copyable
                                       e_T_v   * ( v_rl_cWH_dq_p(:,i) + cross(v_angp_dqp_p{i},v_rl_cWH) + cross(v_angp_dqp{i},v_rl_cWH_dq*qp) );
                 e_rr_cWHp_dqp_p{i} =  e_T_v_p * ( v_rr_cWH_dq(:,i)   + cross(v_angp_dqp{i},v_rr_cWH) ) + ...
                                       e_T_v   * ( v_rr_cWH_dq_p(:,i) + cross(v_angp_dqp_p{i},v_rr_cWH) + cross(v_angp_dqp{i},v_rr_cWH_dq*qp) );
-                e_CGp_dqp_p{i}     =  e_T_v_p * (                      cross(v_angp_dqp{i},obj.DNA.CG_s) ) + ...
-                                      e_T_v   * (                      cross(v_angp_dqp_p{i},obj.DNA.CG_s)                                       );
+                e_CGp_dqp_p{i}     =  e_T_v_p * (                      cross(v_angp_dqp{i},DNA.CG_s) ) + ...
+                                      e_T_v   * (                      cross(v_angp_dqp_p{i},DNA.CG_s)                                       );
 
 
-                Ekin_dqp_dt{i} = 0.5 * obj.sus_fl.unsMass * ( e_fl_cWHp_dqp_p{i}.' * e_fl_cWHp + e_fl_cWHp_dqp{i}.' * e_fl_cWHpp   + ...
+                Ekin_dqp_dt{i} = 0.5 * sus_fl.unsMass * ( e_fl_cWHp_dqp_p{i}.' * e_fl_cWHp + e_fl_cWHp_dqp{i}.' * e_fl_cWHpp   + ...
                                                               e_fl_cWHpp.' * e_fl_cWHp_dqp{i}  + e_fl_cWHp.' * e_fl_cWHp_dqp_p{i}) + ...
-                                 0.5 * obj.sus_fr.unsMass * ( e_fr_cWHp_dqp_p{i}.' * e_fr_cWHp + e_fr_cWHp_dqp{i}.' * e_fr_cWHpp   + ...
+                                 0.5 * sus_fr.unsMass * ( e_fr_cWHp_dqp_p{i}.' * e_fr_cWHp + e_fr_cWHp_dqp{i}.' * e_fr_cWHpp   + ...
                                                               e_fr_cWHpp.' * e_fr_cWHp_dqp{i}  + e_fr_cWHp.' * e_fr_cWHp_dqp_p{i}) + ... 
-                                 0.5 * obj.sus_rl.unsMass * ( e_rl_cWHp_dqp_p{i}.' * e_rl_cWHp + e_rl_cWHp_dqp{i}.' * e_rl_cWHpp   + ...
+                                 0.5 * sus_rl.unsMass * ( e_rl_cWHp_dqp_p{i}.' * e_rl_cWHp + e_rl_cWHp_dqp{i}.' * e_rl_cWHpp   + ...
                                                               e_rl_cWHpp.' * e_rl_cWHp_dqp{i}  + e_rl_cWHp.' * e_rl_cWHp_dqp_p{i}) + ... 
-                                 0.5 * obj.sus_rr.unsMass * ( e_rr_cWHp_dqp_p{i}.' * e_rr_cWHp + e_rr_cWHp_dqp{i}.' * e_rr_cWHpp   + ...
+                                 0.5 * sus_rr.unsMass * ( e_rr_cWHp_dqp_p{i}.' * e_rr_cWHp + e_rr_cWHp_dqp{i}.' * e_rr_cWHpp   + ...
                                                               e_rr_cWHpp.' * e_rr_cWHp_dqp{i}  + e_rr_cWHp.' * e_rr_cWHp_dqp_p{i}) + ...
-                                 0.5 * obj.DNA.susMass    * ( e_CGp_dqp_p{i}.' * e_CGp + e_CGp_dqp{i}.' * e_CGpp                   + ...
+                                 0.5 * DNA.susMass    * ( e_CGp_dqp_p{i}.' * e_CGp + e_CGp_dqp{i}.' * e_CGpp                   + ...
                                                               e_CGpp.' * e_CGp_dqp{i}  + e_CGp.' * e_CGp_dqp_p{i}                  + ...
-                                 0.5 * ( e_angp_dqp_p{i}.' * obj.DNA.CG_I * e_angp + e_angp_dqp{i}.' * obj.DNA.CG_I * e_angpp      + ...
-                                         e_angpp.' * obj.DNA.CG_I * e_angp_dqp{i}  + e_angp.' * obj.DNA.CG_I * e_angp_dqp_p{i} )      ) ;
+                                 0.5 * ( e_angp_dqp_p{i}.' * DNA.CG_I * e_angp + e_angp_dqp{i}.' * DNA.CG_I * e_angpp      + ...
+                                         e_angpp.' * DNA.CG_I * e_angp_dqp{i}  + e_angp.' * DNA.CG_I * e_angp_dqp_p{i} )      ) ;
 
                 % AINDA FALTA A FORCA DO AMORTECEDOR
                 Qnc{i} =  (e_pos_dq{i}   +   e_T_v_dq{i} * v_fl_TYRO   +   e_T_v * v_fl_TYRO_dq(:,i)).' * e_fl_Ftyre + ...
@@ -325,163 +341,73 @@ classdef veh < matlab.mixin.Copyable
             Lagrange_sym = [Lagrange{:}];
             Lagrange_sym = Lagrange_sym(t).';
                              
+            
+            
             fprintf('    Reducing differential order...\n');
-            [Lagrange_red, q_red, Rel] = reduceDifferentialOrder(Lagrange_sym, q);
+            [Lagrange_red, q_red, Rel] = reduceDifferentialOrder(Lagrange_sym, q); %#ok<ASGLU>
             
-            fprintf('    Calculating mass matrix...\n');
-            [M_ode,F_ode] = massMatrixForm(Lagrange_red,q_red);
-            
-            % Lista com todos as variaveis secundarias. Talvez nao precise
-            % usar agora neste momento do codigo
-% % %             s_fl = cell2sym(struct2cell(obj.sus_fl.s_prefix));
-% % %             s_fr = cell2sym(struct2cell(obj.sus_fr.s_prefix));
-% % %             s_rl = cell2sym(struct2cell(obj.sus_rl.s_prefix));
-% % %             s_rr = cell2sym(struct2cell(obj.sus_rr.s_prefix));
-
-            extra_vars_dq = [v_fl_TYRO_dq
-                             v_fl_cWH_dq
-                             v_fl_bDS_dq
-                             v_fr_TYRO_dq
-                             v_fr_cWH_dq
-                             v_fr_bDS_dq
-                             v_rl_TYRO_dq
-                             v_rl_cWH_dq
-                             v_rl_bDS_dq
-                             v_rr_TYRO_dq
-                             v_rr_cWH_dq
-                             v_rr_bDS_dq];
-            extra_vars = [  v_fl_TYRO
-                            v_fl_cWH
-                            v_fl_bDS     
-                            v_fr_TYRO
-                            v_fr_cWH
-                            v_fr_bDS                         
-                            v_rl_TYRO
-                            v_rl_cWH
-                            v_rl_bDS                    
-                            v_rr_TYRO                
-                            v_rr_cWH 
-                            v_rr_bDS];          
-            inputs =[e_fl_Ftyre
-                     e_fr_Ftyre
-                     e_rl_Ftyre
-                     e_rr_Ftyre];
+            obj.q = q;
+            obj.q_red = q_red;
+                      
+            extra_vars_dq = [v_fl_TYRO_dq; v_fl_cWH_dq; v_fl_bDS_dq;
+                             v_fr_TYRO_dq; v_fr_cWH_dq; v_fr_bDS_dq;
+                             v_rl_TYRO_dq; v_rl_cWH_dq; v_rl_bDS_dq;
+                             v_rr_TYRO_dq; v_rr_cWH_dq; v_rr_bDS_dq];
+            extra_vars = [  v_fl_TYRO; v_fl_cWH; v_fl_bDS;     
+                            v_fr_TYRO; v_fr_cWH; v_fr_bDS;                         
+                            v_rl_TYRO; v_rl_cWH; v_rl_bDS;                    
+                            v_rr_TYRO; v_rr_cWH; v_rr_bDS];          
+            inputs =[e_fl_Ftyre; e_fr_Ftyre; e_rl_Ftyre; e_rr_Ftyre];
                              
             extra_params = setdiff(symvar(Lagrange_red), [symvar(q_red) symvar(extra_vars) symvar(extra_vars_dq) symvar(inputs)]); % MUST BE EMPTY
             if ~isempty(extra_params)
                 error('Unkown parameters in the ODE functions set... Aborting');
             end
-                             
-            M_ode_fun = odeFunction(M_ode, q_red, extra_vars, extra_vars_dq, inputs, 'File','ode_fun/M_ode_fun.m', 'Optimize', false);
-            F_ode_fun = odeFunction(F_ode, q_red, extra_vars, extra_vars_dq, inputs, 'File','ode_fun/F_ode_fun.m', 'Optimize', false);
+            
+            
+            fprintf('    Calculating mass matrix...\n');
+            [M_ode,F_ode] = massMatrixForm(Lagrange_red,q_red);
+            M_ode_fun = odeFunction(M_ode, q_red, extra_vars, extra_vars_dq, inputs, 'File','classes/@veh/M_ode_fun.m', 'Optimize', false);
+            F_ode_fun = odeFunction(F_ode, q_red, extra_vars, extra_vars_dq, inputs, 'File','classes/@veh/F_ode_fun.m', 'Optimize', false);
         
             
-            obj.q = q;
-            obj.q_red = q_red;
-            
-        
-%             e_fl_Ftyre = [0 0 tyr.stiffness*(tyr.compressionLength-v_fl_TYRO(3))*(v_fl_TYRO(3)<tyr.compressionLength)];
-%             e_fr_Ftyre = [0 0 tyr.stiffness*(tyr.compressionLength-v_fr_TYRO(3))*(v_fr_TYRO(3)<tyr.compressionLength)];
-%             e_rl_Ftyre = [0 0 tyr.stiffness*(tyr.compressionLength-v_rl_TYRO(3))*(v_rl_TYRO(3)<tyr.compressionLength)];
-%             e_rr_Ftyre = [0 0 tyr.stiffness*(tyr.compressionLength-v_rr_TYRO(3))*(v_rr_TYRO(3)<tyr.compressionLength)];
-            
-            q_k = [0 0 pi/4   2 2 2  obj.sus_fl.init.LAUR_0(3) obj.sus_fr.init.LAUR_0(3) obj.sus_rl.init.LAUR_0(3) obj.sus_rr.init.LAUR_0(3)  0 0 ]';
-            dq_k= [0 0 0      0 0 0      0 0 0 0     0 0]';
-
             s_strings = {'TYRO_1','TYRO_2','TYRO_3','cWH_1','cWH_2','cWH_3','bDS'}';   
-            extra_vars_k = [obj.sus_fl.getKinq([q_k(7);q_k(11)], s_strings);
-                            obj.sus_fr.getKinq([q_k(8);q_k(11)], s_strings);
-                            obj.sus_rl.getKinq([q_k(9);q_k(12)], s_strings);
-                            obj.sus_rr.getKinq([q_k(10);q_k(12)],s_strings)];           
+            extra_vars_k = @(q_red) [obj.sus_fl.getKinq([q_red(7);q_red(11)], s_strings);
+                                     obj.sus_fr.getKinq([q_red(8);q_red(11)], s_strings);
+                                     obj.sus_rl.getKinq([q_red(9);q_red(12)], s_strings);
+                                     obj.sus_rr.getKinq([q_red(10);q_red(12)],s_strings)];           
             
-            s_strings_all = cellfun(@char, sym2cell(obj.sus_fl.s),'UniformOutput', false);           
-            s_fl_k = obj.sus_fl.getKinq([q_k(7);q_k(11)], s_strings_all);
-            s_fr_k = obj.sus_fr.getKinq([q_k(8);q_k(11)], s_strings_all);
-            s_rl_k = obj.sus_rl.getKinq([q_k(9);q_k(12)], s_strings_all);
-            s_rr_k = obj.sus_rr.getKinq([q_k(10);q_k(12)], s_strings_all);
+            s_strings_all = cellfun(@char, sym2cell(obj.sus_fl.s),'UniformOutput', false);
+            s_fl_k = @(q_red) obj.sus_fl.getKinq([q_red(7);q_red(11)], s_strings_all);
+            s_fr_k = @(q_red) obj.sus_fr.getKinq([q_red(8);q_red(11)], s_strings_all);
+            s_rl_k = @(q_red) obj.sus_rl.getKinq([q_red(9);q_red(12)], s_strings_all);
+            s_rr_k = @(q_red) obj.sus_rr.getKinq([q_red(10);q_red(12)], s_strings_all);
 
-            extra_vars_dq_k = [obj.sus_fl.get_K_matrices([q_k(7);q_k(11)], s_fl_k, s_strings);
-                               obj.sus_fr.get_K_matrices([q_k(8);q_k(11)], s_fr_k, s_strings);
-                               obj.sus_rl.get_K_matrices([q_k(9);q_k(12)], s_rl_k, s_strings);
-                               obj.sus_rr.get_K_matrices([q_k(10);q_k(12)], s_rr_k, s_strings)];
+            extra_vars_dq_k = @(q_red) [obj.sus_fl.get_K_matrices([q_red(7);q_red(11)],  s_fl_k(q_red), s_strings);
+                                        obj.sus_fr.get_K_matrices([q_red(8);q_red(11)],  s_fr_k(q_red), s_strings);
+                                        obj.sus_rl.get_K_matrices([q_red(9);q_red(12)],  s_rl_k(q_red), s_strings);
+                                        obj.sus_rr.get_K_matrices([q_red(10);q_red(12)], s_rr_k(q_red), s_strings)];
 
-            inputs_k = zeros([12,1]);
+            inputs_k = @(q_red) zeros([12,1]);
 
-            M_ode_fun_k = @(t,q_red) M_ode_fun(t,q_red,extra_vars_k,extra_vars_dq_k,inputs_k);
-            F_ode_fun_k = @(t,q_red) F_ode_fun(t,q_red,extra_vars_k,extra_vars_dq_k,inputs_k);
+            M_ode_fun_k = @(t,q_red) obj.M_ode_fun(q_red, extra_vars_k(q_red), extra_vars_dq_k(q_red), inputs_k(q_red));
+            F_ode_fun_k = @(t,q_red) obj.F_ode_fun(q_red, extra_vars_k(q_red), extra_vars_dq_k(q_red), inputs_k(q_red));
             
-            opt = odeset('Mass', M_ode_fun_k, 'RelTol', 10.0^(-7), 'AbsTol' ,10.0^(-7));
 
-            tspan = [0:0.01:2];
-            [tSol,ySol] = ode15s(F_ode_fun_k, tspan, [q_k, dq_k], opt);
+                M_ode_fun_k(1,[q_k; dq_k])
+                F_ode_fun_k(1,[q_k; dq_k])
+            
+            opt = odeset('Mass', M_ode_fun_k, 'RelTol', 1e-3, 'AbsTol' ,1e-5, ...
+                         'OutputFcn','odeplot', 'MassSingular','no');
+            q_k = [0 0 0   2 2 2  obj.sus_fl.init.LAUR_0(3) obj.sus_fr.init.LAUR_0(3) obj.sus_rl.init.LAUR_0(3) obj.sus_rr.init.LAUR_0(3)  0 0 ]';
+            dq_k= [0 0 0      0 0 0      0 0 0 0     0 0]';
+            tspan = [0,1];
+            [tSol,ySol] = ode23t(F_ode_fun_k, tspan, [q_k; dq_k], opt);
 
             figure
             plot(tSol,ySol(:,4),'-o')
         end
-        
-        function plotKinAnalysis(obj)                        
-            fun_linspace = @(x,n) linspace(min(min(obj.sus_fl.kin.(x))),max(max(obj.sus_fl.kin.(x))),n);                        
-            figure('Color','white')
-            
-            % SR vs toe vs heave
-            subplot(2,2,1)           
-            heave = fun_linspace('heave',5);
-            bSR   = fun_linspace('bSR',50);            
-            toe = obj.sus_fl.getKin('heave',heave,'bSR',bSR,{'toe'});            
-            plot(bSR, toe*180/pi)
-            grid on
-            xlabel('Steering Rack Displacement [m]')
-            ylabel('Toe-in angle [degree]')
-            leg = legend(cellfun(@(x) sprintf('%.3f',x),num2cell(heave),'UniformOutput',false));
-            title(leg,'Heave [m]')
-            title('Steering Rack x Toe-in x Heave')
-            
-            % (spring,motion ratio) vs heave
-            subplot(2,2,2) 
-            heave = fun_linspace('heave',100);
-            bSR = 0;
-            bDS = obj.sus_fl.getKin('heave',heave,'bSR',bSR,{'bDS'}) - norm(obj.sus_fl.init.DSCH_0-obj.sus_fl.init.RKDS_0);          
-            MR  = gradient(bDS,heave);
-            yyaxis left
-            plot(heave, bDS)
-            ylabel('Spring Displacement [m]')
-            yyaxis right
-            plot(heave, MR)
-            ylabel('Motion Ratio')
-            ylim([-1.5 -0.5])
-            grid on
-            xlabel('Heave [m]')
-            title('Heave x Spring Displacement/MotionRatio')
-                        
-            % heave vs camber vs toe
-            subplot(2,2,3) 
-            heave = fun_linspace('heave',50);
-            toe   = fun_linspace('toe',10);            
-            camber = obj.sus_fl.getKin('heave',heave,'toe',toe,{'camber'});            
-            plot(heave, camber*180/pi)
-            grid on
-            xlabel('Heave [m]')
-            ylabel('Camber [degree]')
-            leg = legend(cellfun(@(x) sprintf('%.1f',x),num2cell(toe*180/pi),'UniformOutput',false));
-            title(leg,'Toe-in angle [degree]');
-            title('Heave x Camber x Toe-in')
-           
-            % heave vs camber vs toe
-            subplot(2,2,4) 
-            contour(obj.sus_fl.kin.heave,obj.sus_fl.kin.camber*180/pi,obj.sus_fl.kin.toe*180/pi,'ShowText','on')
-            grid on
-            xlabel('Heave [m]')
-            ylabel('Camber [degree]')
-            title('Heave x Camber x Toe-in')
-            
-            % track vs heave vs toe
-        end
-        
-        function plot(obj, fig, init)
-            % Plot all the four suspensions... add parameter to the
-            % suspension plot function (CG pos and rotation)
-        end
-    end
-    
+
+    end   
 end
 
