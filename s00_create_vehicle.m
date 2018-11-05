@@ -10,7 +10,7 @@ clearvars; clc;
 save_veh = true;
 save_path = 'vehicles/veh.mat';
 
-if isempty(gcp('nocreate')), parpool(4); end
+% if isempty(gcp('nocreate')), parpool(4); end
 
 
 %% Kinematics data
@@ -56,6 +56,22 @@ susFL.init.RKAL_0 = 1e-3*[1472.09 255.000 130.000]';
 susFL.init.ALAB_0 = 1e-3*[1472.09 255.000 70.0000]';
 susFL.init.ALAR_0 = 1e-3*[1392.09 255.000 70.0000]';
 
+
+% Mass
+susFR.unsMass = 2;
+% setup
+susFR.setup.toe                 = -1*pi/180;     % [rad]
+susFR.setup.camber              = 2*pi/180;    % [rad]
+susFR.setup.kspring             = 200000;       % [N/m]
+% Hard points
+susFR.init = susFL.init;
+names = fieldnames(susFR.init);
+for i=1:numel( names )
+    susFR.init.(names{i}) = susFR.init.(names{i}) .* [1 -1 1]';
+end
+
+
+
 % Mass
 susRL.unsMass = 2;
 % setup
@@ -81,6 +97,20 @@ susRL.init.RKAL_0 = 1e-3*[202.896 286.000 165.000]';
 susRL.init.ALAB_0 = 1e-3*[202.896 286.000 105.000]';
 susRL.init.ALAR_0 = 1e-3*[96.8960 286.000 105.000]';
 
+% Mass
+susRR.unsMass = 2;
+% setup
+susRR.setup.toe                 = 1*pi/180;      % [rad]
+susRR.setup.camber              = 2*pi/180;      % [rad]
+susRR.setup.kspring             = 200000;        % [N/m]
+% Hard points
+susRR.init = susRL.init;
+names = fieldnames(susRR.init);
+for i=1:numel( names )
+    susRR.init.(names{i}) = susRR.init.(names{i}) .* [1 -1 1]';
+end
+
+
 %% Run Kinematics and create vehicle
 
 WH_stroke = [-2 2]*0.0254;
@@ -88,15 +118,31 @@ SR_stroke = [-0.02 0.02];
 WH_steps = 15;
 SR_steps = 10;
 
-veh_tyr = veh_tyr(tyr.unloadedRadius, tyr.aspectRatio, tyr.width, tyr.compressionLength, tyr.stiffness);
+veh_Tyr = veh_tyr(tyr.unloadedRadius, tyr.aspectRatio, tyr.width, tyr.compressionLength, tyr.stiffness);
 
-veh_sus_fl = veh_sus(susFL.init, susFL.setup, susFL.unsMass, veh_tyr, WH_stroke, WH_steps, SR_stroke, SR_steps);
-veh_sus_fr = veh_sus_fl.mirror();
-veh_sus_rl = veh_sus(susRL.init, susRL.setup, susRL.unsMass, veh_tyr, WH_stroke, WH_steps, [0 0], 1);
-veh_sus_rr = veh_sus_rl.mirror();
+
+fprintf('Computing Kinematics - Parallel batch mode...')
+j = {batch('veh_sus', 1, {susFL.init, susFL.setup, susFL.unsMass, veh_Tyr, WH_stroke, WH_steps, SR_stroke, SR_steps});
+     batch('veh_sus', 1, {susFR.init, susFR.setup, susFR.unsMass, veh_Tyr, WH_stroke, WH_steps, SR_stroke, SR_steps});
+     batch('veh_sus', 1, {susRL.init, susRL.setup, susRL.unsMass, veh_Tyr, WH_stroke, WH_steps, 0.1*SR_stroke, 2});
+     batch('veh_sus', 1, {susRR.init, susRR.setup, susRR.unsMass, veh_Tyr, WH_stroke, WH_steps, 0.1*SR_stroke, 2})   };
+for ji =1:numel(j)
+    wait(j{ji});
+end
+veh_sus_fl = fetchOutputs(j{1}); veh_sus_fl = veh_sus_fl{1};
+veh_sus_fr = fetchOutputs(j{2}); veh_sus_fr = veh_sus_fr{1};
+veh_sus_rl = fetchOutputs(j{3}); veh_sus_rl = veh_sus_rl{1};
+veh_sus_rr = fetchOutputs(j{4}); veh_sus_rr = veh_sus_rr{1};
+fprintf('OK\n')
+
+% veh_sus_fl = veh_sus(susFL.init, susFL.setup, susFL.unsMass, veh_Tyr, WH_stroke, WH_steps, SR_stroke, SR_steps);
+% veh_sus_fr = veh_sus(susFR.init, susFR.setup, susFR.unsMass, veh_Tyr, WH_stroke, WH_steps, SR_stroke, SR_steps);
+% veh_sus_rl = veh_sus(susRL.init, susRL.setup, susRL.unsMass, veh_Tyr, WH_stroke, WH_steps, 0.1*SR_stroke, 2);
+% veh_sus_rr = veh_sus(susRR.init, susRR.setup, susRR.unsMass, veh_Tyr, WH_stroke, WH_steps, 0.1*SR_stroke, 2);
+
 
 veh = veh(DNA, veh_sus_fl, veh_sus_fr, veh_sus_rl, veh_sus_rr);
-% % % % % % % % veh.calculateDynamics();
+
 
 %% Save to file
 

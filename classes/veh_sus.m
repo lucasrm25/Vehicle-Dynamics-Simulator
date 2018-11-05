@@ -37,7 +37,8 @@ classdef veh_sus < matlab.mixin.Copyable
         s           % secondary coordinates - vector of symbolic names
         s_prefix    % struct containing symbolic names with prefix
         kl          % kinematic loops - class
-        kin         % kinematic tables                        
+        kin         % kinematic tables
+        kinfun_q    % griddedInterpolant - function of q
         
         Kmatrix
         Lmatrix
@@ -87,28 +88,24 @@ classdef veh_sus < matlab.mixin.Copyable
             obj.reshapematrix = @(matrix) matrix*shift;
         end
         
-        function Vq = getKin(obj, XFieldName, Xq, YFieldName, Yq, fieldNames)   
+        % Xq and Yq are vectors
+        % Output a matrix
+        function Vq = getKin(obj, XFieldName, Xq, YFieldName, Yq, ZfieldName)
             X = obj.kin.(char(XFieldName));
             Y = obj.kin.(char(YFieldName));
-            for i=1:numel(fieldNames)
-                V  = obj.kin.(char(fieldNames(i)));
-                if numel(Xq) > 1 || numel(Yq) > 1
-                    Vq = griddata(X,Y,V,Xq,Yq','cubic');
-                    return
-                end
-                if min(size(V)) == 1
-                    Vq(i,1) = interp1(X,V,Xq,'pchip',0);
-                else
-%                     Vq(i,1) = interp2(X,Y,V,Xq,Yq,'cubic',0);
-                    Vq(i,1) = griddata(X,Y,V,Xq,Yq','cubic');
-                end
-            end
+            V = obj.kin.(char(ZfieldName));
+            Vq = griddata(X,Y,V,Xq,Yq','cubic');
         end
 
+        % fieldNames can be a cell array of names
+        % Output a vector for each fieldname
         function Vq = getKinq(obj, q, fieldNames)
-            Vq = getKin(obj, obj.q(1), q(1), obj.q(2), q(2), fieldNames);
+            for i=1:numel(fieldNames)
+                Vq(i,1) = obj.kinfun_q.(char(fieldNames(i)))(q(1),q(2));
+            end
         end
         
+        % return a fieldNames*q matrix
         function K = get_K_matrices(obj, q, s, fieldNames)
             K = zeros([numel(fieldNames), 2]);
             for i=1:numel(fieldNames)
@@ -271,7 +268,7 @@ classdef veh_sus < matlab.mixin.Copyable
 
             f_PR = createTmatrixFunction_point(obj.init.UACH1_0,obj.init.UACH2_0,UAUR,obj.init.UACH1_0,obj.init.UACH2_0,obj.init.UAUR_0,obj.init.PRUA_0) ;
             s_PR = PRUA;
-            q_PR = UAUR;            
+            q_PR = UAUR;
             kinLoop_PR = kinLoop(f_PR, q_PR, s_PR, 0, 'fun');                        
 
             %% Rocker kinematics
@@ -313,8 +310,8 @@ classdef veh_sus < matlab.mixin.Copyable
                      rotatePoint(obj.init.ALAB_0,uAR,bAR,obj.init.ALAR_0) - ALAB ];
             s_AR   = [RKAL; ALAB; bAR];
             s_AR_0 = [obj.init.RKAL_0; obj.init.ALAB_0; 0];
-            q_AR = [bRK];           
-            kinLoop_AR = kinLoop(f_AR, q_AR, s_AR, s_AR_0);   
+            q_AR = [bRK];
+            kinLoop_AR = kinLoop(f_AR, q_AR, s_AR, s_AR_0);
             
             %% Toe and Camber
 
@@ -324,7 +321,7 @@ classdef veh_sus < matlab.mixin.Copyable
                      angle2vectors([0 1 1]'.*uWH,[0 1 0]',[1 0 0]')  ;
                      TYRO(3) - obj.init.TYRO_0(3) ];
             s_TC = [toe; camber; heave];
-            q_TC = [uWH; TYRO(3)];           
+            q_TC = [uWH; TYRO(3)];
             kinLoop_TC = kinLoop(f_TC, q_TC, s_TC, 0, 'fun');
             
             %% Jacobian Matrices
@@ -335,7 +332,7 @@ classdef veh_sus < matlab.mixin.Copyable
             for i=1:numel(obj.kl)
                 jacob_K_Kmain = jacobian(obj.kl(i).q,obj.q);        % K matrix definition
                 for j=1:i-1
-                    jacob_K_Kmain = jacob_K_Kmain + jacobian(obj.kl(i).q,obj.kl(j).s) * obj.kl(j).Kmain;    % 
+                    jacob_K_Kmain = jacob_K_Kmain + jacobian(obj.kl(i).q,obj.kl(j).s) * obj.kl(j).Kmain;
                 end
                 obj.kl(i).Kmain = obj.kl(i).jacobian * jacob_K_Kmain;
                 for j=1:numel(obj.kl(i).s)
@@ -365,26 +362,9 @@ classdef veh_sus < matlab.mixin.Copyable
             end
             for i=1:numel(names)
                 obj.kin.(char(names(i))) = val(:,:,i);
+                obj.kinfun_q.(char(names(i))) = griddedInterpolant(LAUR_3_val',bSR_val',val(:,:,i)','cubic','linear');
             end
-%             multiWaitbar( 'CloseAll' );
-        end
-            
-        function new = mirror(obj)
-            new = copy(obj);
-            variables2inverse = {'bSR','LAUR_2','UAUR_2','cWH_2','PRUA_2','RKDS_2','RKPR_2','SRTR_2','TRUR_2','TYRO_2','uWH_2','ALAB_2','RKAL_2'};                                    
-            for i=1:numel(variables2inverse)
-                new.kin.(variables2inverse{i})  = -obj.kin.(variables2inverse{i});
-                if isfield(new.Kmatrix,variables2inverse{i})
-                    aux = str2func(func2str(new.Kmatrix.(variables2inverse{i})));
-                    new.Kmatrix.(variables2inverse{i}) = @(q,s) -aux(q,s);
-                    aux = str2func(func2str(new.Lmatrix.(variables2inverse{i})));
-                    new.Lmatrix.(variables2inverse{i}) = @(q,s) -aux(q,s);
-                end
-            end
-            init2inverse = {'UACH1_0','UACH2_0','LACH1_0','LACH2_0','DSCH_0','RKCH_0','ALAR_0'};
-            for i=1:numel(init2inverse)
-                new.init.(init2inverse{i}) = new.init.(init2inverse{i}).*[1,-1,1]';
-            end
+            multiWaitbar( 'CloseAll' );
         end
         
         function vec = plotSpring(~, p1, p2, radius, nCoils )
